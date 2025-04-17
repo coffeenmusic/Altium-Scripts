@@ -4,7 +4,19 @@
 { Analyzes all nets on a PCB and generates a CSV file with                    }
 { net names and their worst-case current capacities                           }
 { Calculates current capacity based on complete paths with the same width     }
+{ Traces paths across multiple layers through vias                            }
 {..............................................................................}
+
+// Forward declarations to resolve circular references
+Procedure FindConnectedObjects(Board : IPCB_Board; Net : IPCB_Net; X, Y : Integer;
+                              Layer : TLayer; Width : TCoord; ProcessedTracks : TObjectList;
+                              ProcessedVias : TObjectList; CurrentPath : TObjectList;
+                              Tolerance : TCoord); Forward;
+
+Procedure FindConnectedLayerTracks(Board : IPCB_Board; Net : IPCB_Net; X, Y : Integer;
+                                 Layer : TLayer; Width : TCoord; ProcessedTracks : TObjectList;
+                                 ProcessedVias : TObjectList; CurrentPath : TObjectList;
+                                 Tolerance : TCoord); Forward;
 
 // Power function from the original script
 Function pow(base, exponent: double): double;
@@ -37,6 +49,8 @@ Var
     Track : IPCB_Primitive;
     TrackLength : Double;
     i : Integer;
+    CurrentLayer : TLayer;
+    CurrentWidth : TCoord;
 Begin
     Result := 0; // Initialize with 0
 
@@ -45,6 +59,9 @@ Begin
 
     // Get the first track to determine width and layer
     Track := Tracks[0];
+
+    // Skip if not a track or arc
+    if not ((Track.ObjectID = eTrackObject) or (Track.ObjectID = eArcObject)) then Exit;
 
     // Get layer information
     L1 := LStack.LayerObject(Track.Layer);
@@ -66,23 +83,47 @@ Begin
     // Skip if width or thickness is zero
     if (w <= 0) or (h <= 0) then Exit;
 
-    // Calculate total path length
+    // We need to separate calculations by layer and width
+    // Group tracks by layer/width and calculate capacity for each group
     TotalLength := 0;
+    CurrentWidth := 0;
+    CurrentLayer := 0;
+
     for i := 0 to Tracks.Count - 1 do
     begin
         Track := Tracks[i];
 
-        // Calculate length based on object type
-        Case Track.ObjectID of
-            eTrackObject:
-                TrackLength := coordToMils(sqrt(sqr(Track.x2 - Track.x1) + sqr(Track.y2 - Track.Y1)));
-            eArcObject:
-                TrackLength := coordToMils(((Track.StartAngle - Track.EndAngle)/360) * pi * Track.Radius);
-            else
-                TrackLength := 0;
-        End;
+        // Only process tracks and arcs
+        if (Track.ObjectID = eTrackObject) or (Track.ObjectID = eArcObject) then
+        begin
+            // Calculate length based on object type
+            Case Track.ObjectID of
+                eTrackObject:
+                begin
+                    if (CurrentWidth <> Track.Width) or (CurrentLayer <> Track.Layer) then
+                    begin
+                        CurrentWidth := Track.Width;
+                        CurrentLayer := Track.Layer;
+                    end;
 
-        TotalLength := TotalLength + TrackLength;
+                    TrackLength := coordToMils(sqrt(sqr(Track.x2 - Track.x1) + sqr(Track.y2 - Track.Y1)));
+                end;
+                eArcObject:
+                begin
+                    if (CurrentWidth <> Track.LineWidth) or (CurrentLayer <> Track.Layer) then
+                    begin
+                        CurrentWidth := Track.LineWidth;
+                        CurrentLayer := Track.Layer;
+                    end;
+
+                    TrackLength := coordToMils(((Track.StartAngle - Track.EndAngle)/360) * pi * Track.Radius);
+                end;
+                else
+                    TrackLength := 0;
+            End;
+
+            TotalLength := TotalLength + TrackLength;
+        end;
     end;
 
     // Assign IPC-2221 constants
@@ -110,103 +151,234 @@ Begin
     Result := I_10;
 End;
 
-// Helper function to get the key for a track (used for identifying unique paths)
-Function GetTrackKey(Track : IPCB_Primitive) : String;
-Begin
-    // Create a unique key based on track properties
-    Result := IntToStr(Track.Layer) + '-';
-
-    Case Track.ObjectID of
-        eTrackObject:
-            Result := Result + IntToStr(Track.Width);
-        eArcObject:
-            Result := Result + IntToStr(Track.LineWidth);
-        else
-            Result := Result + '0';
-    End;
-End;
-
-// Helper function to find connected tracks at a point
-Procedure FindConnectedTracks(Board : IPCB_Board; Net : IPCB_Net; X, Y : Integer;
+// Helper function to find connected tracks and vias at a point
+Procedure FindConnectedObjects(Board : IPCB_Board; Net : IPCB_Net; X, Y : Integer;
                               Layer : TLayer; Width : TCoord; ProcessedTracks : TObjectList;
-                              CurrentPath : TObjectList; Tolerance : TCoord);
+                              ProcessedVias : TObjectList; CurrentPath : TObjectList;
+                              Tolerance : TCoord);
 Var
     SIter : IPCB_SpatialIterator;
+    Primitive : IPCB_Primitive;
+    Via : IPCB_Via;
     Track : IPCB_Primitive;
     ConnectedX, ConnectedY : Integer;
     IsConnected : Boolean;
+    TrackWidth : TCoord;
 Begin
     // Create spatial iterator to find nearby objects
+    SIter := Board.SpatialIterator_Create;
+    SIter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, eViaObject));
+    SIter.AddFilter_Area(X - Tolerance, Y - Tolerance, X + Tolerance, Y + Tolerance);
+
+    // Find all connected objects
+    Primitive := SIter.FirstPCBObject;
+    While (Primitive <> nil) do
+    Begin
+        // Check if object is in the same net
+        if (Primitive.InNet) and (Primitive.Net.Name = Net.Name) then
+        begin
+            Case Primitive.ObjectID of
+                eTrackObject, eArcObject:
+                begin
+                    // Only process tracks with same width and same layer
+                    if Primitive.ObjectID = eTrackObject then
+                        TrackWidth := Primitive.Width
+                    else
+                        TrackWidth := Primitive.LineWidth;
+
+                    if (Primitive.Layer = Layer) and (TrackWidth = Width) then
+                    begin
+                        // Check if this track is already processed
+                        if ProcessedTracks.IndexOf(Primitive) = -1 then
+                        begin
+                            Track := Primitive;
+                            IsConnected := False;
+
+                            Case Track.ObjectID of
+                                eTrackObject:
+                                begin
+                                    // Check if either endpoint connects
+                                    if (Abs(Track.x1 - X) <= Tolerance) and (Abs(Track.y1 - Y) <= Tolerance) then
+                                    begin
+                                        ConnectedX := Track.x2;
+                                        ConnectedY := Track.y2;
+                                        IsConnected := True;
+                                    end
+                                    else if (Abs(Track.x2 - X) <= Tolerance) and (Abs(Track.y2 - Y) <= Tolerance) then
+                                    begin
+                                        ConnectedX := Track.x1;
+                                        ConnectedY := Track.y1;
+                                        IsConnected := True;
+                                    end;
+                                end;
+                                eArcObject:
+                                begin
+                                    // Check if either endpoint connects
+                                    if (Abs(Track.StartX - X) <= Tolerance) and (Abs(Track.StartY - Y) <= Tolerance) then
+                                    begin
+                                        ConnectedX := Track.EndX;
+                                        ConnectedY := Track.EndY;
+                                        IsConnected := True;
+                                    end
+                                    else if (Abs(Track.EndX - X) <= Tolerance) and (Abs(Track.EndY - Y) <= Tolerance) then
+                                    begin
+                                        ConnectedX := Track.StartX;
+                                        ConnectedY := Track.StartY;
+                                        IsConnected := True;
+                                    end;
+                                end;
+                            end;
+
+                            // If connected, add to path and continue tracing
+                            if IsConnected then
+                            begin
+                                // Add to processed list and current path
+                                ProcessedTracks.Add(Track);
+                                CurrentPath.Add(Track);
+
+                                // Recursively find next connected objects
+                                FindConnectedObjects(Board, Net, ConnectedX, ConnectedY, Layer, Width, ProcessedTracks, ProcessedVias, CurrentPath, Tolerance);
+                            end;
+                        end;
+                    end;
+                end;
+                eViaObject:
+                begin
+                    Via := Primitive;
+                    // Check if via is already processed
+                    if ProcessedVias.IndexOf(Via) = -1 then
+                    begin
+                        // Check if via is connected at this point
+                        if (Abs(Via.x - X) <= Tolerance) and (Abs(Via.y - Y) <= Tolerance) then
+                        begin
+                            // Check if via connects to current layer
+                            if Via.IntersectLayer(Layer) then
+                            begin
+                                // Add via to processed list and current path
+                                ProcessedVias.Add(Via);
+                                CurrentPath.Add(Via);
+
+                                // Find tracks on all other layers this via connects to
+                                // Create a spatial iterator for each layer
+                                for Layer := eTopLayer to eBottomLayer do
+                                begin
+                                    if Via.IntersectLayer(Layer) then
+                                    begin
+                                        // Find tracks on this layer
+                                        FindConnectedLayerTracks(Board, Net, Via.x, Via.y, Layer, Width, ProcessedTracks, ProcessedVias, CurrentPath, Tolerance);
+                                    end;
+                                end;
+                            end;
+                        end;
+                    end;
+                end;
+            end;
+        end;
+
+        Primitive := SIter.NextPCBObject;
+    End;
+
+    // Clean up
+    Board.SpatialIterator_Destroy(SIter);
+End;
+
+// Helper function to find connected tracks on a specific layer
+Procedure FindConnectedLayerTracks(Board : IPCB_Board; Net : IPCB_Net; X, Y : Integer;
+                                 Layer : TLayer; Width : TCoord; ProcessedTracks : TObjectList;
+                                 ProcessedVias : TObjectList; CurrentPath : TObjectList;
+                                 Tolerance : TCoord);
+Var
+    SIter : IPCB_SpatialIterator;
+    Primitive : IPCB_Primitive;
+    Track : IPCB_Primitive;
+    ConnectedX, ConnectedY : Integer;
+    IsConnected : Boolean;
+    TrackWidth : TCoord;
+Begin
+    // Create spatial iterator to find nearby tracks on this layer
     SIter := Board.SpatialIterator_Create;
     SIter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject));
     SIter.AddFilter_LayerSet(MkSet(Layer));
     SIter.AddFilter_Area(X - Tolerance, Y - Tolerance, X + Tolerance, Y + Tolerance);
 
     // Find all connected tracks
-    Track := SIter.FirstPCBObject;
-    While (Track <> nil) do
+    Primitive := SIter.FirstPCBObject;
+    While (Primitive <> nil) do
     Begin
-        // Check if the track is in the same net and has the same width
-        if (Track.InNet) and (Track.Net.Name = Net.Name) and
-           (((Track.ObjectID = eTrackObject) and (Track.Width = Width)) or
-            ((Track.ObjectID = eArcObject) and (Track.LineWidth = Width))) then
+        // Check if track is in the same net
+        if (Primitive.InNet) and (Primitive.Net.Name = Net.Name) then
         begin
-            // Check if this track is already processed
-            if ProcessedTracks.IndexOf(Track) = -1 then
+            // Only process tracks with the width we're looking for
+            if Primitive.ObjectID = eTrackObject then
+                TrackWidth := Primitive.Width
+            else
+                TrackWidth := Primitive.LineWidth;
+
+            // Use relaxed width matching for tracks connected via vias
+            if (TrackWidth > 0) then // Use the current track width
             begin
-                // Determine connection point based on object type
-                IsConnected := False;
-
-                Case Track.ObjectID of
-                    eTrackObject:
-                    begin
-                        // Check if either endpoint connects
-                        if (Abs(Track.x1 - X) <= Tolerance) and (Abs(Track.y1 - Y) <= Tolerance) then
-                        begin
-                            ConnectedX := Track.x2;
-                            ConnectedY := Track.y2;
-                            IsConnected := True;
-                        end
-                        else if (Abs(Track.x2 - X) <= Tolerance) and (Abs(Track.y2 - Y) <= Tolerance) then
-                        begin
-                            ConnectedX := Track.x1;
-                            ConnectedY := Track.y1;
-                            IsConnected := True;
-                        end;
-                    end;
-                    eArcObject:
-                    begin
-                        // Check if either endpoint connects
-                        if (Abs(Track.StartX - X) <= Tolerance) and (Abs(Track.StartY - Y) <= Tolerance) then
-                        begin
-                            ConnectedX := Track.EndX;
-                            ConnectedY := Track.EndY;
-                            IsConnected := True;
-                        end
-                        else if (Abs(Track.EndX - X) <= Tolerance) and (Abs(Track.EndY - Y) <= Tolerance) then
-                        begin
-                            ConnectedX := Track.StartX;
-                            ConnectedY := Track.StartY;
-                            IsConnected := True;
-                        end;
-                    end;
-                end;
-
-                // If connected, add to path and continue tracing
-                if IsConnected then
+                // Check if this track is already processed
+                if ProcessedTracks.IndexOf(Primitive) = -1 then
                 begin
-                    // Add to processed list and current path
-                    ProcessedTracks.Add(Track);
-                    CurrentPath.Add(Track);
+                    Track := Primitive;
+                    IsConnected := False;
 
-                    // Recursively find next connected track
-                    FindConnectedTracks(Board, Net, ConnectedX, ConnectedY, Layer, Width,
-                                       ProcessedTracks, CurrentPath, Tolerance);
+                    Case Track.ObjectID of
+                        eTrackObject:
+                        begin
+                            // Check if either endpoint connects
+                            if (Abs(Track.x1 - X) <= Tolerance) and (Abs(Track.y1 - Y) <= Tolerance) then
+                            begin
+                                ConnectedX := Track.x2;
+                                ConnectedY := Track.y2;
+                                IsConnected := True;
+                            end
+                            else if (Abs(Track.x2 - X) <= Tolerance) and (Abs(Track.y2 - Y) <= Tolerance) then
+                            begin
+                                ConnectedX := Track.x1;
+                                ConnectedY := Track.y1;
+                                IsConnected := True;
+                            end;
+                        end;
+                        eArcObject:
+                        begin
+                            // Check if either endpoint connects
+                            if (Abs(Track.StartX - X) <= Tolerance) and (Abs(Track.StartY - Y) <= Tolerance) then
+                            begin
+                                ConnectedX := Track.EndX;
+                                ConnectedY := Track.EndY;
+                                IsConnected := True;
+                            end
+                            else if (Abs(Track.EndX - X) <= Tolerance) and (Abs(Track.EndY - Y) <= Tolerance) then
+                            begin
+                                ConnectedX := Track.StartX;
+                                ConnectedY := Track.StartY;
+                                IsConnected := True;
+                            end;
+                        end;
+                    end;
+
+                    // If connected, add to path and continue tracing
+                    if IsConnected then
+                    begin
+                        // Add to processed list and current path
+                        ProcessedTracks.Add(Track);
+                        CurrentPath.Add(Track);
+
+                        // Get the actual width of this track
+                        if Track.ObjectID = eTrackObject then
+                            Width := Track.Width
+                        else
+                            Width := Track.LineWidth;
+
+                        // Recursively find next connected objects
+                        FindConnectedObjects(Board, Net, ConnectedX, ConnectedY, Layer, Width, ProcessedTracks, ProcessedVias, CurrentPath, Tolerance);
+                    end;
                 end;
             end;
         end;
 
-        Track := SIter.NextPCBObject;
+        Primitive := SIter.NextPCBObject;
     End;
 
     // Clean up
@@ -215,18 +387,25 @@ End;
 
 // Helper function to trace a complete path of connected tracks
 Function TraceCompletePath(Board : IPCB_Board; StartTrack : IPCB_Primitive;
-                          ProcessedTracks : TObjectList) : TObjectList;
+                          ProcessedTracks : TObjectList; ProcessedVias : TObjectList) : TObjectList;
 Var
     CurrentPath : TObjectList;
     X1, Y1, X2, Y2, i : Integer;
     Width : TCoord;
     Layer : TLayer;
     Tolerance : TCoord;
-    Obj : TObject;
+    Obj: IPCB_Obj;
 Begin
     // Create object list for the current path
     CurrentPath := CreateObject(TObjectList);
     CurrentPath.OwnsObjects := False; // Don't destroy track objects
+
+    // Only process tracks and arcs
+    if not ((StartTrack.ObjectID = eTrackObject) or (StartTrack.ObjectID = eArcObject)) then
+    begin
+        Result := CurrentPath;
+        Exit;
+    end;
 
     // Add starting track to path and processed list
     CurrentPath.Add(StartTrack);
@@ -264,8 +443,10 @@ Begin
     Tolerance := MilsToCoord(1);
 
     // Trace in both directions from start track
-    FindConnectedTracks(Board, StartTrack.Net, X1, Y1, Layer, Width, ProcessedTracks, CurrentPath, Tolerance);
-    FindConnectedTracks(Board, StartTrack.Net, X2, Y2, Layer, Width, ProcessedTracks, CurrentPath, Tolerance);
+    FindConnectedObjects(Board, StartTrack.Net, X1, Y1, Layer, Width,
+                        ProcessedTracks, ProcessedVias, CurrentPath, Tolerance);
+    FindConnectedObjects(Board, StartTrack.Net, X2, Y2, Layer, Width,
+                        ProcessedTracks, ProcessedVias, CurrentPath, Tolerance);
 
     // Test: View selected Path
     //For i := 0 to CurrentPath.Count - 1 Do
@@ -291,6 +472,7 @@ Var
     TrackIter : IPCB_GroupIterator;
     Track : IPCB_Primitive;
     ProcessedTracks : TObjectList;
+    ProcessedVias : TObjectList;
     CurrentPath : TObjectList;
     PathCapacity : Double;
     i : Integer;
@@ -314,9 +496,12 @@ Begin
     NetList := CreateObject(TObjectList);
     NetList.OwnsObjects := False; // Don't destroy nets when list is freed
 
-    // Create list to track processed tracks
+    // Create list to track processed tracks and vias
     ProcessedTracks := CreateObject(TObjectList);
     ProcessedTracks.OwnsObjects := False; // Don't destroy tracks
+
+    ProcessedVias := CreateObject(TObjectList);
+    ProcessedVias.OwnsObjects := False; // Don't destroy vias
 
     // Create string list for results
     ResultsList := TStringList.Create;
@@ -347,6 +532,10 @@ Begin
 
         ShowMessage('Found ' + IntToStr(NetList.Count) + ' unique nets');
 
+        // Clear processed lists
+        ProcessedTracks.Clear;
+        ProcessedVias.Clear;
+
         // Second pass: find worst-case current capacity for each net
         For i := 0 to NetList.Count - 1 Do
         Begin
@@ -363,10 +552,10 @@ Begin
             While (Track <> Nil) Do
             Begin
                 // Only process tracks we haven't seen yet
-                if ProcessedTracks.IndexOf(Track) = -1 then
+                if (ProcessedTracks.IndexOf(Track) = -1) then
                 begin
                     // Trace the complete path starting from this track
-                    CurrentPath := TraceCompletePath(Board, Track, ProcessedTracks);
+                    CurrentPath := TraceCompletePath(Board, Track, ProcessedTracks, ProcessedVias);
 
                     // Calculate capacity for this path
                     if CurrentPath.Count > 0 then
@@ -417,6 +606,7 @@ Begin
     Finally
         // NetList.Free; -- Don't free this to avoid access violation
         //ProcessedTracks.Free;
+        //ProcessedVias.Free;
         ResultsList.Free;
         NetCapacities.Free;
     End;
