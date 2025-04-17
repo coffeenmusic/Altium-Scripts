@@ -22,8 +22,6 @@ The script will prompt the user to do the following:
 - Get scripts' project path from Jeff Collins and William Kitchen's stripped down version
 
 # TODO
-- Hide other procedure that isn't user related
-- Export original colors in `ColorFromImportedCurrents` procedure
 - Sort template by Net Name
 - Add polygon objects when walking connected tracks
 - Use polygon area to find pinch points in polygons

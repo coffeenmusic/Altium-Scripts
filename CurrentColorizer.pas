@@ -760,6 +760,7 @@ Var
     ColorsPath, ScriptPath : String;
     DEFAULT_COLORS_FILE : String;
     DEFAULT_LOW_CURRENT : Double;
+    SaveOriginals : Boolean;
 Begin
     DEFAULT_COLORS_FILE := 'OriginalNetColors.csv';
     DEFAULT_LOW_CURRENT := 0.001; // Default low current value for nets not in CSV
@@ -885,8 +886,15 @@ Begin
         // Set colors path to script project path
         ColorsPath := ScriptPath + '\' + DEFAULT_COLORS_FILE;
 
-        // Save original colors for potential restoration
-        SaveOriginalNetColors(NetList, ColorsPath);
+        // Ask if user wants to save original colors for later restoration
+        SaveOriginals := ConfirmNoYes('Save original net colors for later restoration?');
+
+        // Save original colors if requested
+        if SaveOriginals then
+        begin
+            SaveOriginalNetColors(NetList, ColorsPath);
+            ShowMessage('Original net colors saved to: ' + ColorsPath);
+        end;
 
         // Start modifying colors
         PCBServer.PreProcess;
@@ -912,7 +920,7 @@ Begin
             end;
 
             // Calculate color based on current value
-            ColorValue := GetColorForCapacity(MaxNetCurrent - NetCurrent, MinNetCurrent, MaxNetCurrent);
+            ColorValue := GetColorForCapacity(NetCurrent, MinNetCurrent, MaxNetCurrent);
 
             // Set net color
             CurrentNet.Color := ColorValue;
