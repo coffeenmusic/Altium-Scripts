@@ -968,9 +968,9 @@ Begin
     End;
 End;
 
-Procedure ColorFromCalculatedCurrentCapactity;
+Procedure ColorFromCalculatedCurrentCapacity;
 Const
-    DEFAULT_FILE = 'NetCurrents.csv';
+    DEFAULT_FILE = 'CurrentCapacityCalculations.csv';
     DEFAULT_COLORS_FILE = 'OriginalNetColors.csv';
 Var
     Board : IPCB_Board;

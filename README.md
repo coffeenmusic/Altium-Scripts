@@ -14,6 +14,14 @@ The script will prompt the user to do the following:
 - Color nets based on current carrying capacity. Red (low current carrying capacity), Yellow (medium), Green (High)
 - Export a CSV with the minimum current capacities. Min(All multilayer connected track/arcs)
 
+<figure>
+  <p>
+    <img src="assets/before.jpg" alt="Before" width="200">
+    <img src="assets/after.jpg" alt="After" width="200">
+  </p>
+  <figcaption>Figure 1: Before and After Comparison</figcaption>
+</figure>
+
 3. `RestoreNetColors`: If an OriginalNetColors.csv exists in the script directory (it should autogenerate when running 1. or 2.), then it will import those colors.
 
 # References
@@ -22,6 +30,5 @@ The script will prompt the user to do the following:
 - Get scripts' project path from Jeff Collins and William Kitchen's stripped down version
 
 # TODO
-- Sort template by Net Name
 - Add polygon objects when walking connected tracks
 - Use polygon area to find pinch points in polygons
