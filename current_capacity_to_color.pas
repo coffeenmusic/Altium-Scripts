@@ -486,6 +486,8 @@ End;
 
 // Main procedure to analyze and color net current capacities
 Procedure AnalyzeAndColorNets;
+Const
+     DEFAULT_FILE = 'NetCurrents.csv';
 Var
     Board : IPCB_Board;
     LStack : IPCB_LayerStack;
@@ -504,6 +506,9 @@ Var
     MinNetCapacity, MaxNetCapacity : Double;
     HasPaths : Boolean;
     ColorValue : Integer;
+    SaveCSV, ColorNets : Boolean;
+    saveDialog : TSaveDialog;
+    SavePath: String;
 Begin
     // Retrieve the current board
     Board := PCBServer.GetCurrentPCBBoard;
@@ -512,6 +517,24 @@ Begin
         ShowMessage('No board found');
         Exit;
     end;
+
+    // Ask if user wants to color nets
+    ColorNets := ConfirmNoYes('Color nets based on current capacity?');
+
+    // Ask if user wants to save CSV
+    SaveCSV := ConfirmNoYes('Save minimum current carrying capacity for each net in a csv file?');
+    If SaveCSV Then
+    Begin
+          saveDialog := TSaveDialog.Create(nil);
+          saveDialog.Title := 'Please select a location and filename for the saved data.';
+          saveDialog.Filter := 'CSV file|*.csv';
+          saveDialog.DefaultExt := 'csv';
+          saveDialog.FilterIndex := 0;
+          saveDialog.FileName := DEFAULT_FILE;
+          if saveDialog.Execute then
+             SavePath := saveDialog.FileName
+          else exit;
+    End;
 
     // Get the layer stack
     LStack := Board.LayerStack;
@@ -553,8 +576,6 @@ Begin
         End;
 
         Board.BoardIterator_Destroy(NetIterator);
-
-        ShowMessage('Found ' + IntToStr(NetList.Count) + ' unique nets');
 
         // Clear processed lists
         ProcessedTracks.Clear;
@@ -630,37 +651,55 @@ Begin
         ShowMessage('Min capacity: ' + FloatToStrF(MinNetCapacity, ffFixed, 10, 4) + 'A, Max capacity: ' +
                     FloatToStrF(MaxNetCapacity, ffFixed, 10, 4) + 'A');
 
-        // Third pass: color the nets based on capacity
-        PCBServer.PreProcess;
+        // Third pass: color the nets based on capacity if requested
+        if (ColorNets Or SaveCSV) then
+        begin
+            PCBServer.PreProcess;
 
-        For i := 0 to NetList.Count - 1 Do
-        Begin
-            CurrentNet := NetList[i];
+            For i := 0 to NetList.Count - 1 Do
+            Begin
+                CurrentNet := NetList[i];
 
-            // Skip nets with no valid capacity
-            if (NetCapacities[i] = '999999.9') then Continue;
+                // Skip nets with no valid capacity
+                if (NetCapacities[i] = '999999.9') then Continue;
 
-            // Get color based on capacity
-            PathCapacity := StrToFloat(NetCapacities[i]);
-            ColorValue := GetColorForCapacity(PathCapacity, MinNetCapacity, MaxNetCapacity);
+                // Get color based on capacity
+                PathCapacity := StrToFloat(NetCapacities[i]);
+                ColorValue := GetColorForCapacity(PathCapacity, MinNetCapacity, MaxNetCapacity);
 
-            // Set net color
-            CurrentNet.Color := ColorValue;
-            CurrentNet.OverrideColorForDraw := True;
+                // Set net color
+                If ColorNets Then
+                Begin
+                    CurrentNet.Color := ColorValue;
+                    CurrentNet.OverrideColorForDraw := True;
+                End;
+                
+                If SaveCSV Then
+                Begin
+                    if (NetCapacities[i] = '999999.9') then
+                        ResultsList.Add(CurrentNet.Name + ',N/A')
+                    else
+                        ResultsList.Add(CurrentNet.Name + ',' + NetCapacities[i]);
+                End;
+            End;
 
-            // Add to results CSV
-            ResultsList.Add(CurrentNet.Name + ',' + NetCapacities[i]);
-        End;
+            PCBServer.PostProcess;
 
-        PCBServer.PostProcess;
+            // Refresh display
+            Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
 
-        // Save results to CSV file
-        //ResultsList.SaveToFile('C:\Users\Stephen Thompson\Downloads\NetCurrents.csv');
+            ShowMessage('Nets colored by current capacity (Red=Low, Yellow=Medium, Green=High)');
+        end;
+
+        // Save results to CSV file if requested
+        if (SaveCSV) then
+        begin
+            ResultsList.SaveToFile(SavePath);
+            ShowMessage('Results saved to ' + SavePath);
+        end;
 
         // Refresh display
-        //Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
-
-        ShowMessage('Analysis complete. Nets colored by current capacity (Red=Low, Yellow=Medium, Green=High)');
+        Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
 
     Finally
         // Free string lists
