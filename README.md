@@ -10,5 +10,7 @@ Note: All current calculations use a 10C temperature rise assumption. TODO: Allo
 - Used the SelectBadConnections script by Petar Perisin as a reference to walk tracks
 - Get scripts' project path from Jeff Collins and William Kitchen's stripped down version
 
-# TODO:
-- Give user the option to pick temperature rise setting
+# TODO
+- Import currents from a user csv
+- Add polygon objects when walking connected tracks
+- Use polygon area to find pinch points in polygons

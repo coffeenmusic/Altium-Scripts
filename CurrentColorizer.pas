@@ -223,7 +223,7 @@ Begin
 End;
 
 // Helper function to calculate current capacity for a track path
-Function CalculatePathCurrentCapacity(Tracks : TObjectList; Board : IPCB_Board; LStack : IPCB_LayerStack) : Double;
+Function CalculatePathCurrentCapacity(Tracks : TObjectList; Board : IPCB_Board; LStack : IPCB_LayerStack; TempRiseC : Double) : Double;
 Var
     h : Double; // Layer Thickness in mils
     w : Double; // Track Width in mils
@@ -231,8 +231,8 @@ Var
     z : Double; // Area
     L1 : IPCB_LayerObject;
     isMidLayer : Boolean;
-    I_10 : Double; // Current for 10°C rise (we'll use this as our reference)
-    tk_10 : Double; // Temperature rise constant
+    I_temp : Double; // Current for specified temperature rise
+    tk : Double; // Temperature rise constant
     TotalLength : Double; // Total path length in mils
     Track : IPCB_Primitive;
     TrackLength : Double;
@@ -327,16 +327,16 @@ Begin
     else
         k := 0.048; // External layer
 
-    // Calculate temperature constant for 10°C rise (using the original pow function)
-    tk_10 := k * pow(10, b);
+    // Calculate temperature constant for the specified temperature rise (using the original pow function)
+    tk := k * pow(TempRiseC, b);
 
     // Calculate cross-sectional area
     z := pow((h * w), c);
 
-    // Calculate current for 10°C rise
-    I_10 := z * tk_10;
+    // Calculate current for the specified temperature rise
+    I_temp := z * tk;
 
-    Result := I_10;
+    Result := I_temp;
 End;
 
 // Helper function to trace a complete path of connected tracks
@@ -698,6 +698,8 @@ Var
     ColorValue : Integer;
     SaveCSV, ColorNets : Boolean;
     ColorsPath, ScriptPath : String;
+    TempRiseC : Double;
+    TempRiseStr : String;
 Begin
     // Retrieve the current board
     Board := PCBServer.GetCurrentPCBBoard;
@@ -707,12 +709,21 @@ Begin
         Exit;
     end;
 
-    //mode := InputBox('Net Current Analyzer', 'Select mode (1 = Analyze and Color, 2 = Restore Original Colors):', '1');
-
     // Get script path
     ScriptPath := ScriptProjectPath();
     if ScriptPath = '' then
         ScriptPath := '.'; // Use current directory if script path not found
+
+    // Prompt for temperature rise
+    TempRiseStr := InputBox('Temperature Rise', 'Enter temperature rise in °C:', '10');
+    TempRiseC := StrToFloatDef(TempRiseStr, 10);
+
+    // Ensure valid temperature rise value
+    if TempRiseC <= 0 then
+    begin
+        ShowMessage('Invalid temperature rise. Using default value of 10°C.');
+        TempRiseC := 10;
+    end;
 
     // Ask if user wants to color nets
     ColorNets := ConfirmNoYes('Color nets based on current capacity?');
@@ -742,7 +753,7 @@ Begin
 
     Try
         // Add CSV header
-        ResultsList.Add('Net Name,Current Capacity (A)');
+        ResultsList.Add('Net Name,Current Capacity (A) for ' + FloatToStr(TempRiseC) + '°C rise');
 
         // Create iterator for net objects
         NetIterator := Board.BoardIterator_Create;
@@ -799,10 +810,10 @@ Begin
                     // Trace the complete path starting from this track
                     CurrentPath := TraceCompletePath(Board, Track, ProcessedTracks, ProcessedVias);
 
-                    // Calculate capacity for this path
+                    // Calculate capacity for this path with the specified temperature rise
                     if (CurrentPath.Count > 0) then
                     begin
-                        PathCapacity := CalculatePathCurrentCapacity(CurrentPath, Board, LStack);
+                        PathCapacity := CalculatePathCurrentCapacity(CurrentPath, Board, LStack, TempRiseC);
 
                         // If valid capacity, update minimum for this net
                         if (PathCapacity > 0) then
@@ -839,7 +850,7 @@ Begin
         end;
 
         ShowMessage('Min capacity: ' + FloatToStrF(MinNetCapacity, ffFixed, 10, 4) + 'A, Max capacity: ' +
-                    FloatToStrF(MaxNetCapacity, ffFixed, 10, 4) + 'A');
+                    FloatToStrF(MaxNetCapacity, ffFixed, 10, 4) + 'A for ' + FloatToStr(TempRiseC) + '°C temperature rise');
 
         // Third pass: color the nets based on capacity if requested
         if (ColorNets Or SaveCSV) then
@@ -880,7 +891,8 @@ Begin
             // Refresh display
             Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
 
-            ShowMessage('Nets colored by current capacity (Red=Low, Yellow=Medium, Green=High). Select All Nets from PCB Panel to refresh the colors');
+            ShowMessage('Nets colored by current capacity (Red=Low, Yellow=Medium, Green=High) for ' +
+                        FloatToStr(TempRiseC) + '°C temperature rise. Select All Nets from PCB Panel to refresh the colors.');
         end;
 
         // Save results to CSV file if requested
