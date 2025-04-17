@@ -674,7 +674,275 @@ Begin
     Result := (Red) + (Green shl 8) + (Blue shl 16);
 End;
 
-Procedure Run;
+// Procedure to export a template CSV with all net names
+Procedure ExportCSVTemplate;
+Const
+    DEFAULT_TEMPLATE_FILE = 'MyCurrents.csv'
+Var
+    Board : IPCB_Board;
+    NetList : TObjectList;
+    NetIterator : IPCB_BoardIterator;
+    CurrentNet : IPCB_Net;
+    i : Integer;
+    ResultsList : TStringList;
+    ScriptPath : String;
+    DEFAULT_FILE : String;
+Begin
+    DEFAULT_FILE := 'NetCurrentsTemplate.csv';
+
+    // Retrieve the current board
+    Board := PCBServer.GetCurrentPCBBoard;
+    If (Board = Nil) Then
+    begin
+        ShowMessage('No board found');
+        Exit;
+    end;
+
+    // Create list to store unique nets
+    NetList := CreateObject(TObjectList);
+    NetList.OwnsObjects := False; // Don't destroy nets when list is freed
+
+    // Create string list for results
+    ResultsList := TStringList.Create;
+
+    Try
+        // Add CSV header
+        ResultsList.Add('Net Name,Current (A)');
+
+        // Create iterator for net objects
+        NetIterator := Board.BoardIterator_Create;
+        NetIterator.AddFilter_ObjectSet(MkSet(eNetObject));
+        NetIterator.AddFilter_LayerSet(AllLayers);
+        NetIterator.AddFilter_Method(eProcessAll);
+
+        // Collect all unique nets
+        CurrentNet := NetIterator.FirstPCBObject;
+        While (CurrentNet <> Nil) Do
+        Begin
+            NetList.Add(CurrentNet);
+            CurrentNet := NetIterator.NextPCBObject;
+        End;
+
+        Board.BoardIterator_Destroy(NetIterator);
+
+        // Add each net to the template with empty current value
+        For i := 0 to NetList.Count - 1 Do
+        Begin
+            CurrentNet := NetList[i];
+            ResultsList.Add(CurrentNet.Name + ',');
+        End;
+
+        ScriptPath := ScriptProjectPath();
+
+        // Save the template to the selected file
+        ResultsList.SaveToFile(ScriptPath + '\' + DEFAULT_TEMPLATE_FILE);
+        ShowMessage('Template saved to: ' + ScriptPath);
+    Finally
+        // Free objects
+        ResultsList.Free;
+    End;
+End;
+
+// Procedure to color nets based on imported currents from CSV
+Procedure ColorFromImportedCurrents;
+Var
+    Board : IPCB_Board;
+    NetList : TObjectList;
+    NetIterator : IPCB_BoardIterator;
+    CurrentNet : IPCB_Net;
+    i : Integer;
+    CurrentsMap, ResultsCSV : TStringList;
+    RowData : TStringList;
+    OpenDialog : TOpenDialog;
+    FilePath : String;
+    row_idx : Integer;
+    NetName : String;
+    NetCurrent : Double;
+    MinNetCurrent, MaxNetCurrent : Double;
+    ColorValue : Integer;
+    ColorsPath, ScriptPath : String;
+    DEFAULT_COLORS_FILE : String;
+    DEFAULT_LOW_CURRENT : Double;
+Begin
+    DEFAULT_COLORS_FILE := 'OriginalNetColors.csv';
+    DEFAULT_LOW_CURRENT := 0.001; // Default low current value for nets not in CSV
+
+    // Retrieve the current board
+    Board := PCBServer.GetCurrentPCBBoard;
+    If (Board = Nil) Then
+    begin
+        ShowMessage('No board found');
+        Exit;
+    end;
+
+    // Get script path
+    ScriptPath := ScriptProjectPath();
+    if ScriptPath = '' then
+        ScriptPath := '.'; // Use current directory if script path not found
+
+    // Create open dialog to prompt for CSV file
+    OpenDialog := TOpenDialog.Create(nil);
+    OpenDialog.Title := 'Select the CSV file with net currents';
+    OpenDialog.Filter := 'CSV file|*.csv';
+    OpenDialog.DefaultExt := 'csv';
+    OpenDialog.FilterIndex := 0;
+
+    // If dialog is canceled, exit
+    if not OpenDialog.Execute then
+    begin
+        OpenDialog.Free;
+        Exit;
+    end;
+
+    FilePath := OpenDialog.FileName;
+    OpenDialog.Free;
+
+    // Create list to store unique nets
+    NetList := CreateObject(TObjectList);
+    NetList.OwnsObjects := False; // Don't destroy nets when list is freed
+
+    // Create current map for lookup
+    CurrentsMap := TStringList.Create;
+    CurrentsMap.NameValueSeparator := '=';
+
+    // Create list for CSV data
+    ResultsCSV := TStringList.Create;
+
+    // Create row data parser
+    RowData := TStringList.Create;
+    RowData.Delimiter := ',';
+    RowData.StrictDelimiter := True;
+
+    Try
+        // Load CSV file
+        ResultsCSV.LoadFromFile(FilePath);
+
+        // Skip header row
+        if ResultsCSV.Count > 0 then
+        begin
+            // Create a fast lookup dictionary
+            for row_idx := 1 to ResultsCSV.Count-1 do // Start from 1 to skip header
+            begin
+                RowData.DelimitedText := ResultsCSV.Get(row_idx);
+                if RowData.Count >= 2 then
+                begin
+                    NetName := Trim(RowData.Get(0));
+
+                    // Only add if the current value is not empty
+                    if Trim(RowData.Get(1)) <> '' then
+                    begin
+                        CurrentsMap.Values[NetName] := Trim(RowData.Get(1));
+                    end;
+                end;
+            end;
+        end;
+
+        // Check if we found any currents
+        if CurrentsMap.Count = 0 then
+        begin
+            ShowMessage('No valid current values found in the CSV file. Please ensure the file has the correct format: Net Name,Current (A)');
+            Exit;
+        end;
+
+        // Create iterator for net objects
+        NetIterator := Board.BoardIterator_Create;
+        NetIterator.AddFilter_ObjectSet(MkSet(eNetObject));
+        NetIterator.AddFilter_LayerSet(AllLayers);
+        NetIterator.AddFilter_Method(eProcessAll);
+
+        // First pass: collect all unique nets
+        CurrentNet := NetIterator.FirstPCBObject;
+        While (CurrentNet <> Nil) Do
+        Begin
+            NetList.Add(CurrentNet);
+            CurrentNet := NetIterator.NextPCBObject;
+        End;
+
+        Board.BoardIterator_Destroy(NetIterator);
+
+        // Find min and max current values for scaling
+        MinNetCurrent := 999999.9;
+        MaxNetCurrent := 0;
+
+        // First check the values from the CSV
+        for i := 0 to CurrentsMap.Count - 1 do
+        begin
+            NetCurrent := StrToFloatDef(CurrentsMap.ValueFromIndex[i], 0);
+            if (NetCurrent > 0) then
+            begin
+                if (NetCurrent < MinNetCurrent) then MinNetCurrent := NetCurrent;
+                if (NetCurrent > MaxNetCurrent) then MaxNetCurrent := NetCurrent;
+            end;
+        end;
+
+        // Also consider the default low current value
+        if (DEFAULT_LOW_CURRENT < MinNetCurrent) then MinNetCurrent := DEFAULT_LOW_CURRENT;
+
+        // If no valid range found, use default values
+        if (MinNetCurrent >= MaxNetCurrent) or (MinNetCurrent >= 999999) then
+        begin
+            MinNetCurrent := DEFAULT_LOW_CURRENT;
+            if (MaxNetCurrent <= 0) then MaxNetCurrent := 1;
+        end;
+
+        // Set colors path to script project path
+        ColorsPath := ScriptPath + '\' + DEFAULT_COLORS_FILE;
+
+        // Save original colors for potential restoration
+        SaveOriginalNetColors(NetList, ColorsPath);
+
+        // Start modifying colors
+        PCBServer.PreProcess;
+
+        // For each net, set its color based on current
+        For i := 0 to NetList.Count - 1 Do
+        Begin
+            CurrentNet := NetList[i];
+
+            // Check if this net's name is in our currents map
+            if CurrentsMap.IndexOfName(CurrentNet.Name) >= 0 then
+            begin
+                // Get the current value from CSV
+                NetCurrent := StrToFloatDef(CurrentsMap.Values[CurrentNet.Name], DEFAULT_LOW_CURRENT);
+
+                // Ensure a positive value
+                if (NetCurrent <= 0) then NetCurrent := DEFAULT_LOW_CURRENT;
+            end
+            else
+            begin
+                // Use default low current for nets not in the CSV
+                NetCurrent := DEFAULT_LOW_CURRENT;
+            end;
+
+            // Calculate color based on current value
+            ColorValue := GetColorForCapacity(MaxNetCurrent - NetCurrent, MinNetCurrent, MaxNetCurrent);
+
+            // Set net color
+            CurrentNet.Color := ColorValue;
+            CurrentNet.OverrideColorForDraw := True;
+
+            Board.ViewManager_GraphicallyInvalidatePrimitive(CurrentNet);
+        End;
+
+        PCBServer.PostProcess;
+
+        // Refresh display
+        Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
+
+        ShowMessage('All nets colored by current values (Red=Low, Yellow=Medium, Green=High). Min: ' +
+                    FloatToStrF(MinNetCurrent, ffFixed, 10, 4) + 'A, Max: ' +
+                    FloatToStrF(MaxNetCurrent, ffFixed, 10, 4) + 'A. Nets not in CSV defaulted to ' +
+                    FloatToStrF(DEFAULT_LOW_CURRENT, ffFixed, 10, 4) + 'A');
+
+    Finally
+        // Free string lists
+        CurrentsMap.Free;
+        RowData.Free;
+        ResultsCSV.Free;
+    End;
+End;
+
+Procedure ColorFromCalculatedCurrentCapactity;
 Const
     DEFAULT_FILE = 'NetCurrents.csv';
     DEFAULT_COLORS_FILE = 'OriginalNetColors.csv';
