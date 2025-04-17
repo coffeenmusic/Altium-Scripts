@@ -38,16 +38,13 @@ End;
 {..............................................................................}
 { Get path of this script project.                                             }
 {..............................................................................}
-function ScriptProjectPath() : String;
+function ScriptProjectPath(Workspace: IWorkspace) : String;
 var
-  Workspace : IWorkspace;
   Project   : IProject;
   scriptsPath : TDynamicString;
   projectCount : Integer;
   i      : Integer;
 begin
-  { Attempt to get reference to current workspace. }
-  Workspace  := GetWorkspace;
   if (Workspace = nil) then begin result:=''; exit; end;
 
   { Get a count of the number of currently opened projects.  The script project
@@ -129,7 +126,7 @@ Begin
     end;
 
     // Get script path
-    ScriptPath := ScriptProjectPath();
+    ScriptPath := ScriptProjectPath(GetWorkspace);
     if ScriptPath = '' then
         ScriptPath := '.'; // Use current directory if script path not found
 
@@ -732,7 +729,7 @@ Begin
             ResultsList.Add(CurrentNet.Name + ',');
         End;
 
-        ScriptPath := ScriptProjectPath();
+        ScriptPath := ScriptProjectPath(GetWorkspace);
 
         // Save the template to the selected file
         ResultsList.SaveToFile(ScriptPath + '\' + DEFAULT_TEMPLATE_FILE);
@@ -776,7 +773,7 @@ Begin
     end;
 
     // Get script path
-    ScriptPath := ScriptProjectPath();
+    ScriptPath := ScriptProjectPath(GetWorkspace);
     if ScriptPath = '' then
         ScriptPath := '.'; // Use current directory if script path not found
 
@@ -978,7 +975,7 @@ Begin
     end;
 
     // Get script path
-    ScriptPath := ScriptProjectPath();
+    ScriptPath := ScriptProjectPath(GetWorkspace);
     if ScriptPath = '' then
         ScriptPath := '.'; // Use current directory if script path not found
 

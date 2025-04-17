@@ -1,4 +1,6 @@
-# Current Capacity To Color
+# How to Run
+![Script Options](assets/script_options.jpg)
+
 1. `ColorFromImportedCurrents`: 
 - Export a CSV template (`ExportCSVTemplate`)
 - Add your currents for any high current nets (you can leave the others blank)
