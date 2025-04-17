@@ -166,10 +166,6 @@ Begin
                 if RowData.Count >= 2 then
                 begin
                     NetName := Trim(RowData.Get(0));
-                    //NetColor := StrToIntDef(Trim(RowData.Get(1)), 0);
-
-                    // Store in name-value pairs for fast lookup
-                    //ColorMap.Values[NetName] := IntToStr(NetColor);
                     ColorMap.Values[NetName] := Trim(RowData.Get(1));
                 end;
             end;
@@ -208,6 +204,8 @@ Begin
                 // Restore original color
                 CurrentNet.Color := NetColor;
                 CurrentNet.OverrideColorForDraw := False;
+
+                Board.ViewManager_GraphicallyInvalidatePrimitive(CurrentNet);
             end;
         End;
 
@@ -864,6 +862,8 @@ Begin
                 Begin
                     CurrentNet.Color := ColorValue;
                     CurrentNet.OverrideColorForDraw := True;
+
+                    Board.ViewManager_GraphicallyInvalidatePrimitive(CurrentNet);
                 End;
 
                 If SaveCSV Then
