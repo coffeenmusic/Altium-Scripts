@@ -11,5 +11,5 @@ Note: All current calculations use a 10C temperature rise assumption. TODO: Allo
 - Get scripts' project path from Jeff Collins and William Kitchen's stripped down version
 
 # TODO:
-- Use script directory to save currents
 - Figure out why I have to click on all nets to refresh the color.
+- Give user the option to pick temperature rise setting

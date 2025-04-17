@@ -699,8 +699,7 @@ Var
     HasPaths : Boolean;
     ColorValue : Integer;
     SaveCSV, ColorNets : Boolean;
-    saveDialog : TSaveDialog;
-    SavePath, ColorsPath, ScriptPath : String;
+    ColorsPath, ScriptPath : String;
 Begin
     // Retrieve the current board
     Board := PCBServer.GetCurrentPCBBoard;
@@ -722,19 +721,6 @@ Begin
 
     // Ask if user wants to save CSV
     SaveCSV := ConfirmNoYes('Save minimum current carrying capacity for each net in a csv file?');
-    If SaveCSV Then
-    Begin
-          saveDialog := TSaveDialog.Create(nil);
-          saveDialog.Title := 'Please select a location and filename for the saved data.';
-          saveDialog.Filter := 'CSV file|*.csv';
-          saveDialog.DefaultExt := 'csv';
-          saveDialog.FilterIndex := 0;
-          saveDialog.InitialDir := ScriptPath; // Start in script directory
-          saveDialog.FileName := DEFAULT_FILE;
-          if saveDialog.Execute then
-             SavePath := saveDialog.FileName
-          else exit;
-    End;
 
     // Get the layer stack
     LStack := Board.LayerStack;
@@ -895,14 +881,13 @@ Begin
             Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
 
             ShowMessage('Nets colored by current capacity (Red=Low, Yellow=Medium, Green=High). Select All Nets from PCB Panel to refresh the colors');
-            ShowMessage('Original net colors saved to ' + ColorsPath);
         end;
 
         // Save results to CSV file if requested
         if (SaveCSV) then
         begin
-            ResultsList.SaveToFile(SavePath);
-            ShowMessage('Results saved to ' + SavePath);
+            ResultsList.SaveToFile(ScriptPath + '\' + DEFAULT_FILE);
+            ShowMessage('Results saved to ' + ScriptPath + '\' + DEFAULT_FILE);
         end;
 
         // Refresh display
