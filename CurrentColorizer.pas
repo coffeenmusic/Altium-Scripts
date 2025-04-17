@@ -5,6 +5,9 @@
 { worst-case current capacities across complete signal paths                  }
 {..............................................................................}
 
+const
+    constScriptProjectName = 'CurrentColorizer';  // Set this to your actual script project name
+
 // Forward declarations to resolve circular references
 Procedure FindConnectedObjects(Board : IPCB_Board; Net : IPCB_Net; X, Y : Integer;
                               Layer : TLayer; Width : TCoord; ProcessedTracks : TObjectList;
@@ -30,6 +33,195 @@ Begin
         Result := Value1
     else
         Result := Value2;
+End;
+
+{..............................................................................}
+{ Get path of this script project.                                             }
+{..............................................................................}
+function ScriptProjectPath() : String;
+var
+  Workspace : IWorkspace;
+  Project   : IProject;
+  scriptsPath : TDynamicString;
+  projectCount : Integer;
+  i      : Integer;
+begin
+  { Attempt to get reference to current workspace. }
+  Workspace  := GetWorkspace;
+  if (Workspace = nil) then begin result:=''; exit; end;
+
+  { Get a count of the number of currently opened projects.  The script project
+    from which this script runs must be one of these. }
+  projectCount := Workspace.DM_ProjectCount();
+
+  { Loop over all the open projects.  We're looking for constScriptProjectName
+    (of which we are a part).  Once we find this, we want to record the
+    path to the script project directory. }
+  scriptsPath:='';
+  for i:=0 to projectCount-1 do
+  begin
+    { Get reference to project # i. }
+    Project := Workspace.DM_Projects(i);
+    { See if we found our script project. }
+    if (AnsiPos(constScriptProjectName, Project.DM_ProjectFullPath) > 0) then
+    begin
+      { Strip off project name to give us just the path. }
+      scriptsPath := StringReplace(Project.DM_ProjectFullPath, '\' +
+      constScriptProjectName + '.PrjScr','', MkSet(rfReplaceAll,rfIgnoreCase));
+    end;
+  end;
+  result := scriptsPath;
+end;
+
+// Function to save original net colors to a CSV file
+Procedure SaveOriginalNetColors(NetList : TObjectList; FilePath : String);
+Var
+    ResultsList : TStringList;
+    i : Integer;
+    CurrentNet : IPCB_Net;
+Begin
+    // Create string list for results
+    ResultsList := TStringList.Create;
+
+    Try
+        // Add CSV header
+        ResultsList.Add('Net Name,Original Color');
+
+        // Add each net and its original color
+        For i := 0 to NetList.Count - 1 Do
+        Begin
+            CurrentNet := NetList[i];
+            // Add net name and color to the list
+            ResultsList.Add(CurrentNet.Name + ',' + IntToStr(CurrentNet.Color));
+        End;
+
+        // Save to file
+        ResultsList.SaveToFile(FilePath);
+    Finally
+        // Free string list
+        ResultsList.Free;
+    End;
+End;
+
+// Procedure to restore original net colors from a CSV file
+Procedure RestoreNetColors;
+Const
+    DEFAULT_FILE = 'OriginalNetColors.csv';
+Var
+    Board : IPCB_Board;
+    NetList : TObjectList;
+    NetIterator : IPCB_BoardIterator;
+    CurrentNet : IPCB_Net;
+    i : Integer;
+    ColorMap, SavedColors : TStringList;
+    RowData : TStringList;
+    FilePath, ScriptPath : String;
+    row_idx : Integer;
+    NetName : String;
+    NetColor : Integer;
+Begin
+    // Retrieve the current board
+    Board := PCBServer.GetCurrentPCBBoard;
+    If (Board = Nil) Then
+    begin
+        ShowMessage('No board found');
+        Exit;
+    end;
+
+    // Get script path
+    ScriptPath := ScriptProjectPath();
+    if ScriptPath = '' then
+        ScriptPath := '.'; // Use current directory if script path not found
+
+    // Set default file path to script project path
+    FilePath := ScriptPath + '\' + DEFAULT_FILE;
+
+    // Create color map for lookup
+    SavedColors := TStringList.Create;
+
+    // Create color map for lookup
+    ColorMap := TStringList.Create;
+    ColorMap.NameValueSeparator := '=';
+
+    // Create row data parser
+    RowData := TStringList.Create;
+    RowData.Delimiter := ',';
+    RowData.StrictDelimiter := True;
+
+    // Create list to store unique nets
+    NetList := CreateObject(TObjectList);
+    NetList.OwnsObjects := False; // Don't destroy nets when list is freed
+
+    Try
+        // Load CSV file
+        SavedColors.LoadFromFile(FilePath);
+
+        // Skip header row
+        if SavedColors.Count > 0 then
+        begin
+            // Create a fast lookup dictionary
+            for row_idx := 1 to SavedColors.Count-1 do // Start from 1 to skip header
+            begin
+                RowData.DelimitedText := SavedColors.Get(row_idx);
+                if RowData.Count >= 2 then
+                begin
+                    NetName := Trim(RowData.Get(0));
+                    //NetColor := StrToIntDef(Trim(RowData.Get(1)), 0);
+
+                    // Store in name-value pairs for fast lookup
+                    //ColorMap.Values[NetName] := IntToStr(NetColor);
+                    ColorMap.Values[NetName] := Trim(RowData.Get(1));
+                end;
+            end;
+        end;
+
+        // Create iterator for net objects
+        NetIterator := Board.BoardIterator_Create;
+        NetIterator.AddFilter_ObjectSet(MkSet(eNetObject));
+        NetIterator.AddFilter_LayerSet(AllLayers);
+        NetIterator.AddFilter_Method(eProcessAll);
+
+        // First pass: collect all unique nets
+        CurrentNet := NetIterator.FirstPCBObject;
+        While (CurrentNet <> Nil) Do
+        Begin
+            NetList.Add(CurrentNet);
+            CurrentNet := NetIterator.NextPCBObject;
+        End;
+
+        Board.BoardIterator_Destroy(NetIterator);
+
+        // Start modifying colors
+        PCBServer.PreProcess;
+
+        // For each net, restore its original color if found in the map
+        For i := 0 to NetList.Count - 1 Do
+        Begin
+            CurrentNet := NetList[i];
+
+            // Check if this net's name is in our color map
+            if ColorMap.IndexOfName(CurrentNet.Name) >= 0 then
+            begin
+                // Get the original color
+                NetColor := StrToIntDef(ColorMap.Values[CurrentNet.Name], CurrentNet.Color);
+
+                // Restore original color
+                CurrentNet.Color := NetColor;
+                CurrentNet.OverrideColorForDraw := False;
+            end;
+        End;
+
+        PCBServer.PostProcess;
+
+        // Refresh display
+        Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
+
+        ShowMessage('Original net colors restored');
+    Finally
+        // Free string lists
+        ColorMap.Free;
+        RowData.Free;
+    End;
 End;
 
 // Helper function to calculate current capacity for a track path
@@ -484,10 +676,10 @@ Begin
     Result := (Red) + (Green shl 8) + (Blue shl 16);
 End;
 
-// Main procedure to analyze and color net current capacities
-Procedure AnalyzeAndColorNets;
+Procedure Run;
 Const
-     DEFAULT_FILE = 'NetCurrents.csv';
+    DEFAULT_FILE = 'NetCurrents.csv';
+    DEFAULT_COLORS_FILE = 'OriginalNetColors.csv';
 Var
     Board : IPCB_Board;
     LStack : IPCB_LayerStack;
@@ -508,7 +700,7 @@ Var
     ColorValue : Integer;
     SaveCSV, ColorNets : Boolean;
     saveDialog : TSaveDialog;
-    SavePath: String;
+    SavePath, ColorsPath, ScriptPath : String;
 Begin
     // Retrieve the current board
     Board := PCBServer.GetCurrentPCBBoard;
@@ -517,6 +709,13 @@ Begin
         ShowMessage('No board found');
         Exit;
     end;
+
+    //mode := InputBox('Net Current Analyzer', 'Select mode (1 = Analyze and Color, 2 = Restore Original Colors):', '1');
+
+    // Get script path
+    ScriptPath := ScriptProjectPath();
+    if ScriptPath = '' then
+        ScriptPath := '.'; // Use current directory if script path not found
 
     // Ask if user wants to color nets
     ColorNets := ConfirmNoYes('Color nets based on current capacity?');
@@ -530,6 +729,7 @@ Begin
           saveDialog.Filter := 'CSV file|*.csv';
           saveDialog.DefaultExt := 'csv';
           saveDialog.FilterIndex := 0;
+          saveDialog.InitialDir := ScriptPath; // Start in script directory
           saveDialog.FileName := DEFAULT_FILE;
           if saveDialog.Execute then
              SavePath := saveDialog.FileName
@@ -576,6 +776,12 @@ Begin
         End;
 
         Board.BoardIterator_Destroy(NetIterator);
+
+        // Set colors path to script project path
+        ColorsPath := ScriptPath + '\' + DEFAULT_COLORS_FILE;
+
+        // Always save original colors for potential restoration
+        SaveOriginalNetColors(NetList, ColorsPath);
 
         // Clear processed lists
         ProcessedTracks.Clear;
@@ -673,7 +879,7 @@ Begin
                     CurrentNet.Color := ColorValue;
                     CurrentNet.OverrideColorForDraw := True;
                 End;
-                
+
                 If SaveCSV Then
                 Begin
                     if (NetCapacities[i] = '999999.9') then
@@ -688,7 +894,8 @@ Begin
             // Refresh display
             Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
 
-            ShowMessage('Nets colored by current capacity (Red=Low, Yellow=Medium, Green=High)');
+            ShowMessage('Nets colored by current capacity (Red=Low, Yellow=Medium, Green=High). Select All Nets from PCB Panel to refresh the colors');
+            ShowMessage('Original net colors saved to ' + ColorsPath);
         end;
 
         // Save results to CSV file if requested
