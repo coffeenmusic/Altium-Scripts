@@ -674,19 +674,19 @@ End;
 // Procedure to export a template CSV with all net names
 Procedure ExportCSVTemplate;
 Const
-    DEFAULT_TEMPLATE_FILE = 'MyCurrents.csv'
+    DEFAULT_TEMPLATE_FILE = 'MyCurrents.csv';
 Var
     Board : IPCB_Board;
     NetList : TObjectList;
     NetIterator : IPCB_BoardIterator;
     CurrentNet : IPCB_Net;
     i : Integer;
-    ResultsList : TStringList;
-    ScriptPath : String;
+    ResultsList, NetNamesList : TStringList;
+    ScriptPath, FilePath : String;
     DEFAULT_FILE : String;
+    FileDoesExist : Boolean;
 Begin
     DEFAULT_FILE := 'NetCurrentsTemplate.csv';
-
     // Retrieve the current board
     Board := PCBServer.GetCurrentPCBBoard;
     If (Board = Nil) Then
@@ -695,12 +695,34 @@ Begin
         Exit;
     end;
 
+    // Get script path
+    ScriptPath := ScriptProjectPath(GetWorkspace);
+    if ScriptPath = '' then ScriptPath := '.'; // Use current directory if script path not found
+
+    // Set file path
+    FilePath := ScriptPath + '\' + DEFAULT_TEMPLATE_FILE;
+
+    // Check if file exists
+    if FileExists(FilePath) then
+    begin
+        // Prompt for confirmation to overwrite
+        if not ConfirmNoYes('File exists. You may already have currents saved in this file. Please confirm you are comfortable overwriting it.') then
+        begin
+            ShowMessage('Operation canceled by user.');
+            Exit;
+        end;
+    end;
+
     // Create list to store unique nets
     NetList := CreateObject(TObjectList);
     NetList.OwnsObjects := False; // Don't destroy nets when list is freed
 
     // Create string list for results
     ResultsList := TStringList.Create;
+
+    // Create string list for net names (for sorting)
+    NetNamesList := TStringList.Create;
+    NetNamesList.Sorted := True; // Enable automatic sorting
 
     Try
         // Add CSV header
@@ -717,26 +739,25 @@ Begin
         While (CurrentNet <> Nil) Do
         Begin
             NetList.Add(CurrentNet);
+            // Add net name to sorted list
+            NetNamesList.Add(CurrentNet.Name);
             CurrentNet := NetIterator.NextPCBObject;
         End;
-
         Board.BoardIterator_Destroy(NetIterator);
 
-        // Add each net to the template with empty current value
-        For i := 0 to NetList.Count - 1 Do
+        // Add each net to the template in alphabetical order
+        For i := 0 to NetNamesList.Count - 1 Do
         Begin
-            CurrentNet := NetList[i];
-            ResultsList.Add(CurrentNet.Name + ',');
+            ResultsList.Add(NetNamesList[i] + ',');
         End;
 
-        ScriptPath := ScriptProjectPath(GetWorkspace);
-
         // Save the template to the selected file
-        ResultsList.SaveToFile(ScriptPath + '\' + DEFAULT_TEMPLATE_FILE);
-        ShowMessage('Template saved to: ' + ScriptPath);
+        ResultsList.SaveToFile(FilePath);
+        ShowMessage('Template saved to: ' + FilePath);
     Finally
         // Free objects
         ResultsList.Free;
+        NetNamesList.Free;
     End;
 End;
 
