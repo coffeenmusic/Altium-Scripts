@@ -907,8 +907,16 @@ Begin
         // Set colors path to script project path
         ColorsPath := ScriptPath + '\' + DEFAULT_COLORS_FILE;
 
-        // Ask if user wants to save original colors for later restoration
-        SaveOriginals := ConfirmNoYes('Save original net colors for later restoration?');
+        // Check if file exists
+        SaveOriginals := True;
+        if FileExists(ColorsPath) then
+        begin
+            // Prompt for confirmation to overwrite
+            if not ConfirmNoYes('Would you like to overwrite the save colors file? File already exists.') then
+            begin
+                SaveOriginals := False;
+            end;
+        end;
 
         // Save original colors if requested
         if SaveOriginals then
@@ -990,7 +998,7 @@ Var
     MinNetCapacity, MaxNetCapacity : Double;
     HasPaths : Boolean;
     ColorValue : Integer;
-    SaveCSV, ColorNets : Boolean;
+    SaveCSV, SaveOriginals, ColorNets : Boolean;
     ColorsPath, ScriptPath : String;
     TempRiseC : Double;
     TempRiseStr : String;
@@ -1069,8 +1077,17 @@ Begin
         // Set colors path to script project path
         ColorsPath := ScriptPath + '\' + DEFAULT_COLORS_FILE;
 
-        // Always save original colors for potential restoration
-        SaveOriginalNetColors(NetList, ColorsPath);
+        SaveOriginals := True;
+        if FileExists(ColorsPath) then
+        begin
+            // Prompt for confirmation to overwrite
+            if not ConfirmNoYes('Would you like to overwrite the save colors file? File already exists.') then
+            begin
+                SaveOriginals := False;
+            end;
+        end;
+
+        If SaveOriginals Then SaveOriginalNetColors(NetList, ColorsPath);
 
         // Clear processed lists
         ProcessedTracks.Clear;
