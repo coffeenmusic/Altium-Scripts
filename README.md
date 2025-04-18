@@ -30,5 +30,5 @@ The script will prompt the user to do the following:
 - Get scripts' project path from Jeff Collins and William Kitchen's stripped down version
 
 # TODO
-- Add Progress Bar
+- Add Progress Bar: Too lazy to do this. Just know it takes 10s of seconds to complete.
 - Iterate all polygons/regions/fills/pads after getting all track/arc/via runs. If any of the polys are lower current than tracks or if there are no tracks, update the current. I don't think this is possible, there is no poly segment for the actually poured copper that I know of. We can get the segments, but that doesn't tell you about the poured copper and thermal reliefs. We could get the thermal relief min width, but I don't know how to get the actual thermal spoke count per pad. It's a tougher problem than I originally thought.
