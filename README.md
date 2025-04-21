@@ -6,7 +6,7 @@
 - `DiffPair_Finder`: Finds diff pairs without needing to manually define them. Searches obscure net names as long as they are attached through a two pin component.
 - `FindNoNets`: Searches tracks, polygons, vias, etc to see if any of them are `No Net`
 - `PowerPinsToNetClass`: Gets all symbol pins that are electrical type `Power` and adds them to a layout net class
-- `Silkscreen_Auto_Placer`: Tries to auto place silkscreen. I think the version on the community scripts-libraries is newer w/ other user contributions.
+- `Silkscreen_Auto_Placer`: Didn't include because I already have a separate repo for this and I've pushed it to [scripts-libraries Community Scripts](https://github.com/Altium-Designer-addons/scripts-libraries/tree/master/Scripts%20-%20PCB/AutoPlaceSilkscreen)
 - `SolderPasteGrid`: Given a set of restrictions (min grid width, min gap, min %) try to create a grid that fits those specs to the center pad
 
 # Schematic
