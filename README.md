@@ -19,6 +19,9 @@
 # SchLib
 - `CheckSymbolPinsFromCSV`: Compares pin names to names from a csv and exports a mismatch report
 
+# OutJob
+- `OutJob_RunAll`: Run all output job containers by reading all output job parameters from the .OutJob file (This is just an ini file)
+
 # Half-Baked
 - `CopySymbolParameterPlacement`: Tries to copy parameter positions from one symbol to another
 - `DbLib`: Started trying to figure out how to read components from a DbLib, got some information, but not components
