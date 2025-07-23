@@ -1,6 +1,6 @@
 {..............................................................................}
-{ Summary: Create net labels for all unique nets from ALL schematic sheets     }
-{ in the project. Net labels placed on current sheet in column/row layout     }
+{ Summary: Create net labels OR ports for all unique nets from ALL schematic  }
+{ sheets in the project. Objects placed on current sheet in column/row layout }
 { with 200 mil padding and intelligent wrapping to fit within sheet bounds.   }
 {..............................................................................}
 
@@ -17,34 +17,39 @@ Var
     Net          : INet;
     NetName      : String;
     SchNetlabel  : ISch_Netlabel;
+    SchPort      : ISch_Port;
     UniqueNetNames : TStringList;
     SheetWidth, SheetHeight : Integer;
     CurrentX, CurrentY : Integer;
     MaxY : Integer;
+    mode         : String;
+    PlacePorts   : Boolean;
 Begin
     // Check if schematic server exists
     If SchServer = Nil Then Exit;
+
+    // Prompt user to select mode
+    mode := InputBox('Net/Port Placer', 'Select object type (Net = Net Labels, Port = Ports):', 'Net');
+    
+    // Determine if we should place ports or net labels
+    PlacePorts := (UpperCase(mode) = 'PORT') or (UpperCase(mode) = 'PORTS');
 
     // Get the focused project
     Project := GetWorkspace.DM_FocusedProject;
     If Project = Nil Then Exit;
 
-    // Get the current schematic document for placing net labels
+    // Get the current schematic document for placing objects
     CurrentSch := SchServer.GetCurrentSchDocument;
     If CurrentSch = Nil Then Exit;
 
-    // Get sheet dimensions and calculate usable area with 200 mil padding
+    // Get sheet dimensions and calculate usable area with padding
     SheetWidth := CoordToMils(CurrentSch.SheetSizeX);
     SheetHeight := CoordToMils(CurrentSch.SheetSizeY);
 
     // Calculate layout parameters
-    CurrentX := Padding;  // Starting X position (200 mil padding)
-    CurrentY := Padding;  // Starting Y position (200 mil padding)
-    MaxY := SheetHeight - Padding;  // Maximum Y position (200 mil padding from bottom)
-
-    // Get the current schematic document for placing net labels
-    CurrentSch := SchServer.GetCurrentSchDocument;
-    If CurrentSch = Nil Then Exit;
+    CurrentX := Padding;  // Starting X position
+    CurrentY := Padding;  // Starting Y position
+    MaxY := SheetHeight - Padding;  // Maximum Y position
 
     // Create string list to track unique net names from all schematic sheets
     UniqueNetNames := TStringList.Create;
@@ -72,32 +77,54 @@ Begin
         End;
     End;
 
-    // Create net labels for each unique net name using column/row layout
+    // Create objects for each unique net name using column/row layout
     For I := 0 to UniqueNetNames.Count - 1 Do
     Begin
         NetName := UniqueNetNames[I];
 
-        // Create a new net label
-        SchNetlabel := SchServer.SchObjectFactory(eNetlabel, eCreate_GlobalCopy);
-        If SchNetlabel = Nil Then Continue;
+        If PlacePorts Then
+        Begin
+            // Create a new port object
+            SchPort := SchServer.SchObjectFactory(ePort, eCreate_GlobalCopy);
+            If SchPort = Nil Then Continue;
 
-        // Set net label properties at current position
-        SchNetlabel.Location    := Point(MilsToCoord(CurrentX), MilsToCoord(CurrentY));
-        SchNetlabel.Orientation := eRotate0;
-        SchNetlabel.Text        := NetName;
-        SchNetlabel.Selection   := True;  // Select the net label
+            // Set port properties
+            SchPort.Location  := Point(MilsToCoord(CurrentX), MilsToCoord(CurrentY));
+            SchPort.Style     := ePortRight;
+            SchPort.IOType    := ePortBidirectional;
+            SchPort.Alignment := eHorizontalCentreAlign;
+            SchPort.Width     := MilsToCoord(1000);
+            SchPort.AreaColor := $80ffff;
+            SchPort.TextColor := $00080;
+            SchPort.Name      := NetName;
 
-        // Add the net label to the current schematic document
-        CurrentSch.RegisterSchObjectInContainer(SchNetlabel);
+            // Add the port to the current schematic document
+            CurrentSch.RegisterSchObjectInContainer(SchPort);
+        End
+        Else
+        Begin
+            // Create a new net label
+            SchNetlabel := SchServer.SchObjectFactory(eNetlabel, eCreate_GlobalCopy);
+            If SchNetlabel = Nil Then Continue;
 
-        // Calculate next position (move down by 100 mils)
+            // Set net label properties
+            SchNetlabel.Location    := Point(MilsToCoord(CurrentX), MilsToCoord(CurrentY));
+            SchNetlabel.Orientation := eRotate0;
+            SchNetlabel.Text        := NetName;
+            SchNetlabel.Selection   := True;  // Select the net label
+
+            // Add the net label to the current schematic document
+            CurrentSch.RegisterSchObjectInContainer(SchNetlabel);
+        End;
+
+        // Calculate next position (move down by YInc mils)
         CurrentY := CurrentY + YInc;
 
         // Check if we've reached the bottom padding, move to next column
         If CurrentY > MaxY Then
         Begin
-            CurrentX := CurrentX + XInc;  // Move right by 1000 mils
-            CurrentY := Padding;              // Reset to top position
+            CurrentX := CurrentX + XInc;  // Move right by XInc mils
+            CurrentY := Padding;          // Reset to top position
         End;
     End;
 
