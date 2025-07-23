@@ -23,6 +23,8 @@ Var
     CurrentX, CurrentY : Integer;
     MaxY : Integer;
     mode         : String;
+    PortWidthStr : String;
+    PortWidth    : Integer;
     PlacePorts   : Boolean;
 Begin
     // Check if schematic server exists
@@ -30,9 +32,16 @@ Begin
 
     // Prompt user to select mode
     mode := InputBox('Net/Port Placer', 'Select object type (Net = Net Labels, Port = Ports):', 'Net');
-    
+
     // Determine if we should place ports or net labels
     PlacePorts := (UpperCase(mode) = 'PORT') or (UpperCase(mode) = 'PORTS');
+
+    // If placing ports, prompt for port width
+    If PlacePorts Then
+    Begin
+        PortWidthStr := InputBox('Port Width', 'Enter port width in mils:', '1000');
+        PortWidth := StrToIntDef(PortWidthStr, 1000);  // Default to 1000 if invalid input
+    End;
 
     // Get the focused project
     Project := GetWorkspace.DM_FocusedProject;
@@ -93,7 +102,7 @@ Begin
             SchPort.Style     := ePortRight;
             SchPort.IOType    := ePortBidirectional;
             SchPort.Alignment := eHorizontalCentreAlign;
-            SchPort.Width     := MilsToCoord(1000);
+            SchPort.Width     := MilsToCoord(PortWidth);
             SchPort.AreaColor := $80ffff;
             SchPort.TextColor := $00080;
             SchPort.Name      := NetName;
