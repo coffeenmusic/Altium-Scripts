@@ -7,7 +7,6 @@
 Procedure Run;
 const
     Padding = 500; //mil
-    XInc = 2000;   //mil
     YInc = 100;    //mil
 Var
     I, J         : Integer;
@@ -18,10 +17,14 @@ Var
     NetName      : String;
     SchNetlabel  : ISch_Netlabel;
     SchPort      : ISch_Port;
+    SchWire      : ISch_Wire;
     UniqueNetNames : TStringList;
     SheetWidth, SheetHeight : Integer;
     CurrentX, CurrentY : Integer;
     MaxY : Integer;
+    XInc : Integer;
+    MaxNetNameLength : Integer;
+    MaxNetNameWidth : Integer;
     mode         : String;
     PortWidthStr : String;
     PortWidth    : Integer;
@@ -65,6 +68,9 @@ Begin
     UniqueNetNames.Duplicates := dupIgnore;
     UniqueNetNames.Sorted := True;
 
+    // Initialize maximum net name length tracker
+    MaxNetNameLength := 0;
+
     // Iterate through all physical documents in the project to collect nets
     For I := 0 to Project.DM_PhysicalDocumentCount - 1 Do
     Begin
@@ -81,10 +87,20 @@ Begin
 
                 // Skip empty net names
                 If NetName <> '' Then
+                Begin
                     UniqueNetNames.Add(NetName);
+                    // Track maximum net name length
+                    If Length(NetName) > MaxNetNameLength Then
+                        MaxNetNameLength := Length(NetName);
+                End;
             End;
         End;
     End;
+
+    // Calculate dynamic X spacing based on maximum net name length
+    // Formula: (MaxLength * 50 mil per character, rounded up to nearest 100 mil) + 200 mil margin
+    MaxNetNameWidth := ((MaxNetNameLength * 50 + 99) div 100) * 100;
+    XInc := MaxNetNameWidth + 200;
 
     // Create objects for each unique net name using column/row layout
     For I := 0 to UniqueNetNames.Count - 1 Do
@@ -103,8 +119,8 @@ Begin
             SchPort.IOType    := ePortBidirectional;
             SchPort.Alignment := eHorizontalCentreAlign;
             SchPort.Width     := MilsToCoord(PortWidth);
-            SchPort.AreaColor := $80ffff;
-            SchPort.TextColor := $00080;
+            SchPort.AreaColor := 0;
+            SchPort.TextColor := $FFFFFF;
             SchPort.Name      := NetName;
 
             // Add the port to the current schematic document
@@ -124,6 +140,26 @@ Begin
 
             // Add the net label to the current schematic document
             CurrentSch.RegisterSchObjectInContainer(SchNetlabel);
+
+            // Create a wire under the net label starting 100 mil to the left
+            SchWire := SchServer.SchObjectFactory(eWire, eCreate_GlobalCopy);
+            If SchWire <> Nil Then
+            Begin
+                // Set wire starting point 100 mil to the left of net label
+                SchWire.Location := Point(MilsToCoord(CurrentX - 100), MilsToCoord(CurrentY));
+                SchWire.InsertVertex := 1;
+                SchWire.SetState_Vertex(1, Point(MilsToCoord(CurrentX - 100), MilsToCoord(CurrentY)));
+
+                // Set wire ending point extending right by the calculated max net name width
+                SchWire.InsertVertex := 2;
+                SchWire.SetState_Vertex(2, Point(MilsToCoord(CurrentX + MaxNetNameWidth), MilsToCoord(CurrentY)));
+
+                // Set wire properties
+                SchWire.SetState_LineWidth := eSmall;
+
+                // Add the wire to the current schematic document
+                CurrentSch.RegisterSchObjectInContainer(SchWire);
+            End;
         End;
 
         // Calculate next position (move down by YInc mils)
