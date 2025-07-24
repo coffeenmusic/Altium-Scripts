@@ -204,6 +204,7 @@ Begin
                 Begin
                     // Position test point at the start of the wire (left side)
                     NewComponent.MoveToXY(MilsToCoord(CurrentX - 100 - TP_PINLEN), MilsToCoord(CurrentY));
+                    NewComponent.Designator.Text := 'TP?';
 
                     // Add the test point to the current schematic document
                     CurrentSch.RegisterSchObjectInContainer(NewComponent);
@@ -217,7 +218,15 @@ Begin
         // Check if we've reached the bottom padding, move to next column
         If CurrentY > MaxY Then
         Begin
-            CurrentX := CurrentX + XInc + TP_PINLEN;  // Move right by XInc mils
+            If SelectedTestPoint <> Nil Then
+            Begin
+                 CurrentX := CurrentX + XInc + TP_PINLEN + 100;  // Move right by XInc mils
+            End
+            Else
+            Begin
+                 CurrentX := CurrentX + XInc;  // Move right by XInc mils
+            End;
+
             CurrentY := Padding;          // Reset to top position
         End;
     End;
