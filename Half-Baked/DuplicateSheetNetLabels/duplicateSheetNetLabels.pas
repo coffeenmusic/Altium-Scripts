@@ -8,6 +8,7 @@ Procedure Run;
 const
     Padding = 500; //mil
     YInc = 100;    //mil
+    TP_PINLEN = 300; // Test Point Pin Length
 Var
     I, J         : Integer;
     Doc          : IDocument;
@@ -18,6 +19,10 @@ Var
     SchNetlabel  : ISch_Netlabel;
     SchPort      : ISch_Port;
     SchWire      : ISch_Wire;
+    Iterator     : ISch_Iterator;
+    Component    : ISch_Component;
+    SelectedTestPoint : ISch_Component;
+    NewComponent : ISch_Component;
     UniqueNetNames : TStringList;
     SheetWidth, SheetHeight : Integer;
     CurrentX, CurrentY : Integer;
@@ -102,6 +107,36 @@ Begin
     MaxNetNameWidth := ((MaxNetNameLength * 50 + 99) div 100) * 100;
     XInc := MaxNetNameWidth + 200;
 
+    // Find selected test point component if placing net labels
+    SelectedTestPoint := Nil;
+    If Not PlacePorts Then
+    Begin
+        Iterator := CurrentSch.SchIterator_Create;
+        Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+        Try
+            Component := Iterator.FirstSchObject;
+            While Component <> Nil Do
+            Begin
+                // Check if component is selected and is a test point (designator starts with TP)
+                If Component.Selection And (Copy(Component.Designator.Text, 1, 2) = 'TP') Then
+                Begin
+                    SelectedTestPoint := Component;
+                    Break;
+                End;
+                Component := Iterator.NextSchObject;
+            End;
+        Finally
+            CurrentSch.SchIterator_Destroy(Iterator);
+        End;
+
+        // If test point found, ask user for confirmation
+        If SelectedTestPoint <> Nil Then
+        Begin
+            If Not ConfirmNoYes('Would you like to add the selected test point to all nets?') Then
+                SelectedTestPoint := Nil;
+        End;
+    End;
+
     // Create objects for each unique net name using column/row layout
     For I := 0 to UniqueNetNames.Count - 1 Do
     Begin
@@ -160,6 +195,20 @@ Begin
                 // Add the wire to the current schematic document
                 CurrentSch.RegisterSchObjectInContainer(SchWire);
             End;
+
+            // If test point is selected, replicate it at the start of the wire (left side)
+            If SelectedTestPoint <> Nil Then
+            Begin
+                NewComponent := SelectedTestPoint.Replicate;
+                If NewComponent <> Nil Then
+                Begin
+                    // Position test point at the start of the wire (left side)
+                    NewComponent.MoveToXY(MilsToCoord(CurrentX - 100 - TP_PINLEN), MilsToCoord(CurrentY));
+
+                    // Add the test point to the current schematic document
+                    CurrentSch.RegisterSchObjectInContainer(NewComponent);
+                End;
+            End;
         End;
 
         // Calculate next position (move down by YInc mils)
@@ -168,7 +217,7 @@ Begin
         // Check if we've reached the bottom padding, move to next column
         If CurrentY > MaxY Then
         Begin
-            CurrentX := CurrentX + XInc;  // Move right by XInc mils
+            CurrentX := CurrentX + XInc + TP_PINLEN;  // Move right by XInc mils
             CurrentY := Padding;          // Reset to top position
         End;
     End;
