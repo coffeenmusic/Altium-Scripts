@@ -8,7 +8,7 @@ Procedure Run;
 const
     Padding = 500; //mil
     YInc = 100;    //mil
-    TP_PINLEN = 300; // Test Point Pin Length
+    TP_PINLEN = 200; //mil
 Var
     I, J         : Integer;
     Doc          : IDocument;
@@ -107,34 +107,31 @@ Begin
     MaxNetNameWidth := ((MaxNetNameLength * 50 + 99) div 100) * 100;
     XInc := MaxNetNameWidth + 200;
 
-    // Find selected test point component if placing net labels
+    // Find selected test point component
     SelectedTestPoint := Nil;
-    If Not PlacePorts Then
-    Begin
-        Iterator := CurrentSch.SchIterator_Create;
-        Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
-        Try
-            Component := Iterator.FirstSchObject;
-            While Component <> Nil Do
-            Begin
-                // Check if component is selected and is a test point (designator starts with TP)
-                If Component.Selection And (Copy(Component.Designator.Text, 1, 2) = 'TP') Then
-                Begin
-                    SelectedTestPoint := Component;
-                    Break;
-                End;
-                Component := Iterator.NextSchObject;
-            End;
-        Finally
-            CurrentSch.SchIterator_Destroy(Iterator);
-        End;
-
-        // If test point found, ask user for confirmation
-        If SelectedTestPoint <> Nil Then
+    Iterator := CurrentSch.SchIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+    Try
+        Component := Iterator.FirstSchObject;
+        While Component <> Nil Do
         Begin
-            If Not ConfirmNoYes('Would you like to add the selected test point to all nets?') Then
-                SelectedTestPoint := Nil;
+            // Check if component is selected and is a test point (designator starts with TP)
+            If Component.Selection And (Copy(Component.Designator.Text, 1, 2) = 'TP') Then
+            Begin
+                SelectedTestPoint := Component;
+                Break;
+            End;
+            Component := Iterator.NextSchObject;
         End;
+    Finally
+        CurrentSch.SchIterator_Destroy(Iterator);
+    End;
+
+    // If test point found, ask user for confirmation
+    If SelectedTestPoint <> Nil Then
+    Begin
+        If Not ConfirmNoYes('Would you like to add the selected test point to all nets?') Then
+            SelectedTestPoint := Nil;
     End;
 
     // Create objects for each unique net name using column/row layout
@@ -144,22 +141,56 @@ Begin
 
         If PlacePorts Then
         Begin
-            // Create a new port object
+            // Create a 100 mil wire first to determine positioning
+            SchWire := SchServer.SchObjectFactory(eWire, eCreate_GlobalCopy);
+            If SchWire <> Nil Then
+            Begin
+                // Set wire starting point at current position
+                SchWire.Location := Point(MilsToCoord(CurrentX), MilsToCoord(CurrentY));
+                SchWire.InsertVertex := 1;
+                SchWire.SetState_Vertex(1, Point(MilsToCoord(CurrentX), MilsToCoord(CurrentY)));
+
+                // Set wire ending point 100 mil to the right
+                SchWire.InsertVertex := 2;
+                SchWire.SetState_Vertex(2, Point(MilsToCoord(CurrentX + 100), MilsToCoord(CurrentY)));
+
+                // Set wire properties
+                SchWire.SetState_LineWidth := eSmall;
+
+                // Add the wire to the current schematic document
+                CurrentSch.RegisterSchObjectInContainer(SchWire);
+            End;
+
+            // Create a new port object at the right end of the wire
             SchPort := SchServer.SchObjectFactory(ePort, eCreate_GlobalCopy);
             If SchPort = Nil Then Continue;
 
-            // Set port properties
-            SchPort.Location  := Point(MilsToCoord(CurrentX), MilsToCoord(CurrentY));
+            // Set port properties - position at the end of the wire
+            SchPort.Location  := Point(MilsToCoord(CurrentX + 100), MilsToCoord(CurrentY));
             SchPort.Style     := ePortRight;
             SchPort.IOType    := ePortBidirectional;
             SchPort.Alignment := eHorizontalCentreAlign;
             SchPort.Width     := MilsToCoord(PortWidth);
-            SchPort.AreaColor := 0;
-            SchPort.TextColor := $FFFFFF;
+            SchPort.AreaColor := $80ffff;
+            SchPort.TextColor := $00080;
             SchPort.Name      := NetName;
 
             // Add the port to the current schematic document
             CurrentSch.RegisterSchObjectInContainer(SchPort);
+
+            // If test point is selected, replicate it at the left end of the wire
+            If SelectedTestPoint <> Nil Then
+            Begin
+                NewComponent := SelectedTestPoint.Replicate;
+                If NewComponent <> Nil Then
+                Begin
+                    // Position test point TP_PINLEN + 100 mil to the left of the wire start
+                    NewComponent.MoveToXY(MilsToCoord(CurrentX - TP_PINLEN - 100), MilsToCoord(CurrentY));
+
+                    // Add the test point to the current schematic document
+                    CurrentSch.RegisterSchObjectInContainer(NewComponent);
+                End;
+            End;
         End
         Else
         Begin
@@ -199,16 +230,26 @@ Begin
             // If test point is selected, replicate it at the start of the wire (left side)
             If SelectedTestPoint <> Nil Then
             Begin
-                NewComponent := SelectedTestPoint.Replicate;
+                SchServer.ProcessControl.PreProcess(CurrentSch, '');
+
+                //NewComponent := SelectedTestPoint.Replicate;
+                NewComponent := SchServer.SchObjectFactory(eComponentObject,eCreate_GlobalCopy);
                 If NewComponent <> Nil Then
                 Begin
-                    // Position test point at the start of the wire (left side)
-                    NewComponent.MoveToXY(MilsToCoord(CurrentX - 100 - TP_PINLEN), MilsToCoord(CurrentY));
+                    NewComponent := SelectedTestPoint.Replicate;
+
                     NewComponent.Designator.Text := 'TP?';
+                    // Position test point at the start of the wire (left side)
+                    NewComponent.MoveToXY(MilsToCoord(CurrentX - 100), MilsToCoord(CurrentY));
 
                     // Add the test point to the current schematic document
                     CurrentSch.RegisterSchObjectInContainer(NewComponent);
-                End;
+
+                    SchServer.RobotManager.SendMessage(CurrentSch.I_ObjectAddress,c_BroadCast, SCHM_PrimitiveRegistration,SchPort.I_ObjectAddress);
+                End; 
+
+                // Clean up the robots in Schematic editor
+                SchServer.ProcessControl.PostProcess(CurrentSch, '');
             End;
         End;
 
@@ -220,13 +261,12 @@ Begin
         Begin
             If SelectedTestPoint <> Nil Then
             Begin
-                 CurrentX := CurrentX + XInc + TP_PINLEN + 100;  // Move right by XInc mils
+                CurrentX := CurrentX + XInc + TP_PINLEN + 300;  // Move right with extra padding for test points
             End
             Else
             Begin
-                 CurrentX := CurrentX + XInc;  // Move right by XInc mils
+                CurrentX := CurrentX + XInc + 200;  // Move right with additional padding
             End;
-
             CurrentY := Padding;          // Reset to top position
         End;
     End;

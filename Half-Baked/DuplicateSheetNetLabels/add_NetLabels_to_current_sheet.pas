@@ -1,8 +1,222 @@
 {..............................................................................}
 { Summary: Place all net labels with wires and test points on current sheet,   }
 { grouped by the sheet they originated from, sorted by complexity (least nets  }
-{ first), with sheet name headers.                                             }
+{ first), with sheet name headers. Optionally filter out differential pairs.   }
 {..............................................................................}
+
+// Differential pair detection functions (from Diff_Polarity_Checker.pas)
+Function DiffPolarity(txt: String): Integer;
+var
+   polarity : Integer;
+   t : String;
+   isIn : Boolean;
+Begin
+     result := 0;
+
+     t := LowerCase(txt);
+
+     // If Else to Force priority ordering
+     If      AnsiEndsStr('_dp', t) Then
+     Begin
+         result := 1;
+     End
+     Else If AnsiEndsStr('_dn', t) Then
+     Begin
+         result := -1;
+     End
+     Else If AnsiEndsStr('_dm', t) Then
+     Begin
+         result := -1;
+     End
+     Else If AnsiEndsStr('-dp', t) Then
+     Begin
+         result := 1;
+     End
+     Else If AnsiEndsStr('-dn', t) Then
+     Begin
+         result := -1;
+     End
+     Else If AnsiEndsStr('-dm', t) Then
+     Begin
+         result := -1;
+     End
+     Else If AnsiEndsStr('_p', t) Then
+     Begin
+         result := 1;
+     End
+     Else If AnsiEndsStr('_n', t) Then
+     Begin
+         result := -1;
+     End
+     Else If AnsiEndsStr('-p', t) Then
+     Begin
+         result := 1;
+     End
+     Else If AnsiEndsStr('-n', t) Then
+     Begin
+         result := -1;
+     End
+     Else If AnsiEndsStr('dp', t) Then
+     Begin
+         result := 1;
+     End
+     Else If AnsiEndsStr('dn', t) Then
+     Begin
+         result := -1;
+     End
+     Else If AnsiEndsStr('dm', t) Then
+     Begin
+         result := -1;
+     End
+     Else If AnsiEndsStr('_h', t) Then
+     Begin
+         result := 1;
+     End
+     Else If AnsiEndsStr('_l', t) Then
+     Begin
+         result := -1;
+     End
+     Else If AnsiEndsStr('-h', t) Then
+     Begin
+         result := 1;
+     End
+     Else If AnsiEndsStr('-l', t) Then
+     Begin
+         result := -1;
+     End
+     Else If AnsiEndsStr('+', t) Then
+     Begin
+         result := 1;
+     End
+     Else If AnsiEndsStr('-', t) Then
+     Begin
+         result := -1;
+     End
+     Else If ContainsText(t, '_dp') Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, '_dn') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, '_dm') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, '-dp') Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, '-dn') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, '-dm') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, '_p') Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, '_n') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, '-p') Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, '-n') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, '+') And Not(AnsiStartsStr('+', t)) Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, 'dp') And Not(AnsiStartsStr('dp', t)) Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, 'dn') And Not(AnsiStartsStr('dn', t)) Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, 'dm') And Not(AnsiStartsStr('dm', t)) Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, 'p_') Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, 'n_') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, '_h') Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, '_l') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, '-h') Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, '-l') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, 'h_') Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, 'l_') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, 'p-') Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, 'n-') Then
+     Begin
+       result := -1;
+     End
+     Else If ContainsText(t, 'h-') Then
+     Begin
+       result := 1;
+     End
+     Else If ContainsText(t, 'l-') Then
+     Begin
+       result := -1;
+     End;
+End;
+
+Function IsPotentialDiffPair(txt: String): Boolean;
+var
+   polarity : Integer;
+   t : String;
+   isIn : Boolean;
+Begin
+     result := False;
+
+     t := LowerCase(txt);
+
+     if Not(AnsiStartsStr('net', t)) and (txt <> 'gnd') then
+     Begin
+         polarity := DiffPolarity(txt);
+         if (polarity = -1) or (polarity = 1) then
+         begin
+             result := True;
+         end;
+     End;
+End;
 
 // Simple bubble sort procedure to sort sheets by net count
 Procedure SortSheetsByNetCount(SheetList: TStringList);
@@ -77,6 +291,7 @@ Var
     SortedSheetName : String;
     SortedNetCount : Integer;
     EqualPos     : Integer;
+    IncludeDiffPairs : Boolean;    // New variable to track user choice
 Begin
     // Check if schematic server exists
     If SchServer = Nil Then Exit;
@@ -109,15 +324,16 @@ Begin
         CurrentSch.SchIterator_Destroy(Iterator);
     End;
 
-    // Check if test point was found and confirm with user
+    // Check if test point was found
     If SelectedTestPoint = Nil Then
     Begin
         ShowMessage('Please select a test point (TP) component first.');
         Exit;
     End;
 
-    If Not ConfirmNoYes('Place all nets grouped by sheet complexity using selected test point: ' + SelectedTestPoint.Designator.Text + '?') Then
-        Exit;
+    // Ask user about including differential pairs (default NO)
+    IncludeDiffPairs := ConfirmNoYes('Include differential pair nets in placement?' + #13 + #13 +
+                                    'Default: NO (differential pairs will be filtered out)');
 
     // Create string lists
     PlacedNets := TStringList.Create;
@@ -137,8 +353,12 @@ Begin
     CurrentSheetNets.Sorted := True;
 
     Try
-        // FIRST PASS: Count unique nets on each sheet
-        ShowMessage('Counting nets on each sheet...');
+        // FIRST PASS: Count unique nets on each sheet (with diff pair filtering)
+        If IncludeDiffPairs Then
+            ShowMessage('Counting nets on each sheet (including differential pairs)...')
+        Else
+            ShowMessage('Counting nets on each sheet (excluding differential pairs)...');
+
         For I := 0 to Project.DM_PhysicalDocumentCount - 1 Do
         Begin
             Doc := Project.DM_PhysicalDocuments(I);
@@ -157,10 +377,15 @@ Begin
                     NetName := Net.DM_NetName;
 
                     // Only count non-empty, unique net names
+                    // Apply differential pair filter if requested
                     If (NetName <> '') And (CurrentSheetNets.IndexOf(NetName) = -1) Then
                     Begin
-                        CurrentSheetNets.Add(NetName);
-                        NetCount := NetCount + 1;
+                        // Check if we should include this net based on diff pair setting
+                        If IncludeDiffPairs Or Not IsPotentialDiffPair(NetName) Then
+                        Begin
+                            CurrentSheetNets.Add(NetName);
+                            NetCount := NetCount + 1;
+                        End;
                     End;
                 End;
 
@@ -182,7 +407,10 @@ Begin
         SortSheetsByNetCount(SheetNetCounts);
 
         // Show sorted sheet information
-        ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets. Processing in order of complexity (least nets first)...');
+        If IncludeDiffPairs Then
+            ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets (including diff pairs). Processing in order of complexity (least nets first)...')
+        Else
+            ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets (excluding diff pairs). Processing in order of complexity (least nets first)...');
 
         // Get sheet dimensions and calculate usable area with padding
         SheetWidth := CoordToMils(CurrentSch.SheetSizeX);
@@ -317,9 +545,14 @@ Begin
         End;
 
         // Show completion message
-        ShowMessage('Placement completed!' + #13 +
-                   'Total nets placed: ' + IntToStr(PlacedNets.Count) + #13 +
-                   'Sheets processed in order of complexity (least nets first).');
+        If IncludeDiffPairs Then
+            ShowMessage('Placement completed!' + #13 +
+                       'Total nets placed: ' + IntToStr(PlacedNets.Count) + ' (including differential pairs)' + #13 +
+                       'Sheets processed in order of complexity (least nets first).')
+        Else
+            ShowMessage('Placement completed!' + #13 +
+                       'Total nets placed: ' + IntToStr(PlacedNets.Count) + ' (differential pairs excluded)' + #13 +
+                       'Sheets processed in order of complexity (least nets first).');
 
     Finally
         // Clean up
