@@ -218,6 +218,53 @@ Begin
      End;
 End;
 
+// Function to find all nets connected to NC (No Connect) pins
+Function GetNoConnectNets(Project: IProject): TStringList;
+Var
+    Doc         : IDocument;
+    DocCnt      : Integer;
+    NCNets      : TStringList;
+    pin         : INetItem;
+    net         : INet;
+    NetCnt, PinCnt : Integer;
+    PinName, NetName : String;
+Begin
+    NCNets := TStringList.Create;
+    NCNets.Duplicates := dupIgnore;
+    NCNets.Sorted := True;
+
+    For DocCnt := 0 to Project.DM_LogicalDocumentCount - 1 Do
+    Begin
+        Doc := Project.DM_LogicalDocuments(DocCnt);
+        If Doc.DM_DocumentKind = 'SCH' Then
+        Begin
+            // for each DM_Nets in document...
+            for NetCnt := 0 to Doc.DM_NetCount - 1 do
+            begin
+                net := Doc.DM_Nets(NetCnt);
+                NetName := net.DM_NetName;
+
+                // for each DM_Pins in nets...
+                for PinCnt := 0 to net.DM_PinCount - 1 do
+                begin
+                    pin := net.DM_Pins(PinCnt);
+                    PinName := UpperCase(pin.DM_PinName);
+
+                    // Check if pin name contains "NC" (No Connect)
+
+                    If (NetName <> '') And AnsiStartsStr('NC', PinName) Then
+                    Begin
+                        NCNets.Add(NetName);
+                        Break; // Once we find one NC pin on this net, no need to check others
+                    End;
+                end;
+            end;
+        End;
+    End;
+
+    result := NCNets;
+End;
+
 // Simple bubble sort procedure to sort sheets by net count
 Procedure SortSheetsByNetCount(SheetList: TStringList);
 Var
@@ -283,6 +330,7 @@ Var
     SheetNetCounts : TStringList;  // Will hold "SheetName=NetCount" entries
     SheetNetLists  : TStringList;  // Will hold all nets for each sheet
     CurrentSheetNets : TStringList; // Temp list for nets per sheet
+    NCNets         : TStringList;   // List of nets connected to NC pins
     SheetWidth, SheetHeight : Integer;
     CurrentX, CurrentY : Integer;
     MaxY : Integer;
@@ -352,12 +400,16 @@ Begin
     CurrentSheetNets.Duplicates := dupIgnore;
     CurrentSheetNets.Sorted := True;
 
+    // Get list of nets connected to NC pins
+    ShowMessage('Scanning for No Connect (NC) pins...');
+    NCNets := GetNoConnectNets(Project);
+
     Try
-        // FIRST PASS: Count unique nets on each sheet (with diff pair filtering)
+        // FIRST PASS: Count unique nets on each sheet (with diff pair and NC filtering)
         If IncludeDiffPairs Then
-            ShowMessage('Counting nets on each sheet (including differential pairs)...')
+            ShowMessage('Counting nets on each sheet (including differential pairs, excluding NC nets)...')
         Else
-            ShowMessage('Counting nets on each sheet (excluding differential pairs)...');
+            ShowMessage('Counting nets on each sheet (excluding differential pairs and NC nets)...');
 
         For I := 0 to Project.DM_PhysicalDocumentCount - 1 Do
         Begin
@@ -377,8 +429,8 @@ Begin
                     NetName := Net.DM_NetName;
 
                     // Only count non-empty, unique net names
-                    // Apply differential pair filter if requested
-                    If (NetName <> '') And (CurrentSheetNets.IndexOf(NetName) = -1) Then
+                    // Apply differential pair and NC filter
+                    If (NetName <> '') And (CurrentSheetNets.IndexOf(NetName) = -1) And (NCNets.IndexOf(NetName) = -1) Then
                     Begin
                         // Check if we should include this net based on diff pair setting
                         If IncludeDiffPairs Or Not IsPotentialDiffPair(NetName) Then
@@ -408,9 +460,9 @@ Begin
 
         // Show sorted sheet information
         If IncludeDiffPairs Then
-            ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets (including diff pairs). Processing in order of complexity (least nets first)...')
+            ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets (including diff pairs, excluding ' + IntToStr(NCNets.Count) + ' NC nets). Processing in order of complexity (least nets first)...')
         Else
-            ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets (excluding diff pairs). Processing in order of complexity (least nets first)...');
+            ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets (excluding diff pairs and ' + IntToStr(NCNets.Count) + ' NC nets). Processing in order of complexity (least nets first)...');
 
         // Get sheet dimensions and calculate usable area with padding
         SheetWidth := CoordToMils(CurrentSch.SheetSizeX);
@@ -547,11 +599,11 @@ Begin
         // Show completion message
         If IncludeDiffPairs Then
             ShowMessage('Placement completed!' + #13 +
-                       'Total nets placed: ' + IntToStr(PlacedNets.Count) + ' (including differential pairs)' + #13 +
+                       'Total nets placed: ' + IntToStr(PlacedNets.Count) + ' (including differential pairs, excluding ' + IntToStr(NCNets.Count) + ' NC nets)' + #13 +
                        'Sheets processed in order of complexity (least nets first).')
         Else
             ShowMessage('Placement completed!' + #13 +
-                       'Total nets placed: ' + IntToStr(PlacedNets.Count) + ' (differential pairs excluded)' + #13 +
+                       'Total nets placed: ' + IntToStr(PlacedNets.Count) + ' (excluding differential pairs and ' + IntToStr(NCNets.Count) + ' NC nets)' + #13 +
                        'Sheets processed in order of complexity (least nets first).');
 
     Finally
