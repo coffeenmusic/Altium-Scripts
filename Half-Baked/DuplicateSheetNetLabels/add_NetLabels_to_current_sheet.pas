@@ -218,20 +218,79 @@ Begin
      End;
 End;
 
-// Function to find all nets that should be ignored (NC pins, fiducial nets, and mounting holes)
+// Function to find all nets that already have test points
+Function GetExistingTestPointNets(Project: IProject): TStringList;
+Var
+    Doc         : IDocument;
+    DocCnt      : Integer;
+    ExistingTPNets : TStringList;
+    pin         : INetItem;
+    net         : INet;
+    NetCnt, PinCnt : Integer;
+    CmpDes, NetName : String;
+Begin
+    ExistingTPNets := TStringList.Create;
+    ExistingTPNets.Duplicates := dupIgnore;
+    ExistingTPNets.Sorted := True;
+
+    For DocCnt := 0 to Project.DM_LogicalDocumentCount - 1 Do
+    Begin
+        Doc := Project.DM_LogicalDocuments(DocCnt);
+        If Doc.DM_DocumentKind = 'SCH' Then
+        Begin
+            // for each DM_Nets in document...
+            for NetCnt := 0 to Doc.DM_NetCount - 1 do
+            begin
+                net := Doc.DM_Nets(NetCnt);
+                NetName := net.DM_NetName;
+
+                // for each DM_Pins in nets...
+                for PinCnt := 0 to net.DM_PinCount - 1 do
+                begin
+                    pin := net.DM_Pins(PinCnt);
+                    CmpDes := pin.DM_LogicalPartDesignator;
+
+                    // Check if this pin belongs to a test point component
+                    If AnsiStartsStr('TP', UpperCase(CmpDes)) Then
+                    Begin
+                        If NetName <> '' Then
+                            ExistingTPNets.Add(NetName);
+                        Break; // Once we find one TP pin on this net, no need to check others
+                    End;
+                end;
+            end;
+        End;
+    End;
+
+    result := ExistingTPNets;
+End;
+
+// Function to find all nets that should be ignored (NC pins, fiducial nets, mounting holes, and existing test points)
 Function GetIgnoredNets(Project: IProject): TStringList;
 Var
     Doc         : IDocument;
     DocCnt      : Integer;
     IgnoredNets : TStringList;
+    ExistingTPNets : TStringList;
     pin         : INetItem;
     net         : INet;
-    NetCnt, PinCnt : Integer;
+    NetCnt, PinCnt, i : Integer;
     PinName, NetName : String;
 Begin
     IgnoredNets := TStringList.Create;
     IgnoredNets.Duplicates := dupIgnore;
     IgnoredNets.Sorted := True;
+
+    // First, get all nets that already have test points
+    ExistingTPNets := GetExistingTestPointNets(Project);
+
+    // Add existing test point nets to ignore list
+    For i := 0 to ExistingTPNets.Count - 1 Do
+    Begin
+        IgnoredNets.Add(ExistingTPNets[i]);
+    End;
+
+    ExistingTPNets.Free;
 
     For DocCnt := 0 to Project.DM_LogicalDocumentCount - 1 Do
     Begin
@@ -407,16 +466,16 @@ Begin
     CurrentSheetNets.Duplicates := dupIgnore;
     CurrentSheetNets.Sorted := True;
 
-    // Get list of nets to ignore (NC pins, fiducials, and mounting holes)
-    ShowMessage('Scanning for No Connect (NC) pins, fiducial nets, and mounting holes...');
+    // Get list of nets to ignore (existing test points, NC pins, fiducials, and mounting holes)
+    ShowMessage('Scanning for existing test points, No Connect (NC) pins, fiducial nets, and mounting holes...');
     IgnoredNets := GetIgnoredNets(Project);
 
     Try
-        // FIRST PASS: Count unique nets on each sheet (with diff pair, NC, fiducial, and mounting hole filtering)
+        // FIRST PASS: Count unique nets on each sheet (with comprehensive filtering)
         If IncludeDiffPairs Then
-            ShowMessage('Counting nets on each sheet (including differential pairs, excluding NC, fiducial, and mounting hole nets)...')
+            ShowMessage('Counting nets on each sheet (including differential pairs, excluding existing test points, NC, fiducial, and mounting hole nets)...')
         Else
-            ShowMessage('Counting nets on each sheet (excluding differential pairs, NC, fiducial, and mounting hole nets)...');
+            ShowMessage('Counting nets on each sheet (excluding differential pairs, existing test points, NC, fiducial, and mounting hole nets)...');
 
         For I := 0 to Project.DM_PhysicalDocumentCount - 1 Do
         Begin
@@ -436,7 +495,7 @@ Begin
                     NetName := Net.DM_NetName;
 
                     // Only count non-empty, unique net names
-                    // Apply differential pair, NC, fiducial, and mounting hole filter
+                    // Apply comprehensive filtering (diff pairs, existing test points, NC, fiducials, mounting holes)
                     If (NetName <> '') And (CurrentSheetNets.IndexOf(NetName) = -1) And (IgnoredNets.IndexOf(NetName) = -1) Then
                     Begin
                         // Check if we should include this net based on diff pair setting
@@ -467,9 +526,9 @@ Begin
 
         // Show sorted sheet information
         If IncludeDiffPairs Then
-            ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets (including diff pairs, excluding ' + IntToStr(IgnoredNets.Count) + ' NC/fiducial/mounting hole nets). Processing in order of complexity (least nets first)...')
+            ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets (including diff pairs, excluding ' + IntToStr(IgnoredNets.Count) + ' nets with existing test points/NC/fiducial/mounting holes). Processing in order of complexity (least nets first)...')
         Else
-            ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets (excluding diff pairs and ' + IntToStr(IgnoredNets.Count) + ' NC/fiducial/mounting hole nets). Processing in order of complexity (least nets first)...');
+            ShowMessage('Found ' + IntToStr(SheetNetCounts.Count) + ' sheets with nets (excluding diff pairs and ' + IntToStr(IgnoredNets.Count) + ' nets with existing test points/NC/fiducial/mounting holes). Processing in order of complexity (least nets first)...');
 
         // Get sheet dimensions and calculate usable area with padding
         SheetWidth := CoordToMils(CurrentSch.SheetSizeX);
@@ -606,11 +665,11 @@ Begin
         // Show completion message
         If IncludeDiffPairs Then
             ShowMessage('Placement completed!' + #13 +
-                       'Total nets placed: ' + IntToStr(PlacedNets.Count) + ' (including differential pairs, excluding ' + IntToStr(IgnoredNets.Count) + ' NC/fiducial/mounting hole nets)' + #13 +
+                       'Total nets placed: ' + IntToStr(PlacedNets.Count) + ' (including differential pairs, excluding ' + IntToStr(IgnoredNets.Count) + ' nets with existing test points/NC/fiducial/mounting holes)' + #13 +
                        'Sheets processed in order of complexity (least nets first).')
         Else
             ShowMessage('Placement completed!' + #13 +
-                       'Total nets placed: ' + IntToStr(PlacedNets.Count) + ' (excluding differential pairs and ' + IntToStr(IgnoredNets.Count) + ' NC/fiducial/mounting hole nets)' + #13 +
+                       'Total nets placed: ' + IntToStr(PlacedNets.Count) + ' (excluding differential pairs and ' + IntToStr(IgnoredNets.Count) + ' nets with existing test points/NC/fiducial/mounting holes)' + #13 +
                        'Sheets processed in order of complexity (least nets first).');
 
     Finally
