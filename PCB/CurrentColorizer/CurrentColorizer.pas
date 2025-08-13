@@ -686,9 +686,10 @@ Var
     CurrentNet : IPCB_Net;
     i : Integer;
     ResultsList, NetNamesList : TStringList;
-    ScriptPath, FilePath : String;
+    FilePath : String;
     DEFAULT_FILE : String;
     FileDoesExist : Boolean;
+    SaveDialog : TSaveDialog;
 Begin
     DEFAULT_FILE := 'NetCurrentsTemplate.csv';
     // Retrieve the current board
@@ -699,23 +700,23 @@ Begin
         Exit;
     end;
 
-    // Get script path
-    ScriptPath := ScriptProjectPath(GetWorkspace);
-    if ScriptPath = '' then ScriptPath := '.'; // Use current directory if script path not found
+    // Create save dialog to prompt for file location
+    SaveDialog := TSaveDialog.Create(nil);
+    SaveDialog.Title := 'Save current template CSV file';
+    SaveDialog.Filter := 'CSV file|*.csv';
+    SaveDialog.DefaultExt := 'csv';
+    SaveDialog.FilterIndex := 0;
+    SaveDialog.FileName := DEFAULT_TEMPLATE_FILE; // Set default filename
 
-    // Set file path
-    FilePath := ScriptPath + '\' + DEFAULT_TEMPLATE_FILE;
-
-    // Check if file exists
-    if FileExists(FilePath) then
+    // If dialog is canceled, exit
+    if not SaveDialog.Execute then
     begin
-        // Prompt for confirmation to overwrite
-        if not ConfirmNoYes('File exists. You may already have currents saved in this file. Please confirm you are comfortable overwriting it.') then
-        begin
-            ShowMessage('Operation canceled by user.');
-            Exit;
-        end;
+        SaveDialog.Free;
+        ShowMessage('Operation canceled by user.');
+        Exit;
     end;
+
+    FilePath := SaveDialog.FileName;
 
     // Create list to store unique nets
     NetList := CreateObject(TObjectList);
@@ -762,6 +763,7 @@ Begin
         // Free objects
         ResultsList.Free;
         NetNamesList.Free;
+        SaveDialog.Free;
     End;
 End;
 
@@ -786,6 +788,7 @@ Var
     DEFAULT_COLORS_FILE : String;
     DEFAULT_LOW_CURRENT : Double;
     SaveOriginals : Boolean;
+    SaveDialog : TSaveDialog;
 Begin
     DEFAULT_COLORS_FILE := 'OriginalNetColors.csv';
     DEFAULT_LOW_CURRENT := 0.001; // Default low current value for nets not in CSV
@@ -908,25 +911,29 @@ Begin
             if (MaxNetCurrent <= 0) then MaxNetCurrent := 1;
         end;
 
-        // Set colors path to script project path
-        ColorsPath := ScriptPath + '\' + DEFAULT_COLORS_FILE;
-
-        // Check if file exists
-        SaveOriginals := True;
-        if FileExists(ColorsPath) then
-        begin
-            // Prompt for confirmation to overwrite
-            if not ConfirmNoYes('Would you like to overwrite the save colors file? File already exists.') then
-            begin
-                SaveOriginals := False;
-            end;
-        end;
+        // Ask if user wants to save original colors
+        SaveOriginals := ConfirmNoYes('Save original net colors before applying new colors?');
 
         // Save original colors if requested
         if SaveOriginals then
         begin
-            SaveOriginalNetColors(NetList, ColorsPath);
-            ShowMessage('Original net colors saved to: ' + ColorsPath);
+            // Create save dialog for original colors
+            SaveDialog := TSaveDialog.Create(nil);
+            SaveDialog.Title := 'Save original net colors CSV file';
+            SaveDialog.Filter := 'CSV file|*.csv';
+            SaveDialog.DefaultExt := 'csv';
+            SaveDialog.FilterIndex := 0;
+            SaveDialog.FileName := DEFAULT_COLORS_FILE;
+
+            // If dialog is not canceled, save colors
+            if SaveDialog.Execute then
+            begin
+                ColorsPath := SaveDialog.FileName;
+                SaveOriginalNetColors(NetList, ColorsPath);
+                ShowMessage('Original net colors saved to: ' + ColorsPath);
+            end;
+
+            SaveDialog.Free;
         end;
 
         // Start modifying colors
@@ -1006,6 +1013,7 @@ Var
     ColorsPath, ScriptPath : String;
     TempRiseC : Double;
     TempRiseStr : String;
+    SaveDialog : TSaveDialog;
 Begin
     // Retrieve the current board
     Board := PCBServer.GetCurrentPCBBoard;
@@ -1078,20 +1086,28 @@ Begin
 
         Board.BoardIterator_Destroy(NetIterator);
 
-        // Set colors path to script project path
-        ColorsPath := ScriptPath + '\' + DEFAULT_COLORS_FILE;
+        // Ask if user wants to save original colors
+        SaveOriginals := ConfirmNoYes('Save original net colors before applying new colors?');
 
-        SaveOriginals := True;
-        if FileExists(ColorsPath) then
+        If SaveOriginals Then
         begin
-            // Prompt for confirmation to overwrite
-            if not ConfirmNoYes('Would you like to overwrite the save colors file? File already exists.') then
-            begin
-                SaveOriginals := False;
-            end;
-        end;
+            // Create save dialog for original colors
+            SaveDialog := TSaveDialog.Create(nil);
+            SaveDialog.Title := 'Save original net colors CSV file';
+            SaveDialog.Filter := 'CSV file|*.csv';
+            SaveDialog.DefaultExt := 'csv';
+            SaveDialog.FilterIndex := 0;
+            SaveDialog.FileName := DEFAULT_COLORS_FILE;
 
-        If SaveOriginals Then SaveOriginalNetColors(NetList, ColorsPath);
+            // If dialog is not canceled, save colors
+            if SaveDialog.Execute then
+            begin
+                ColorsPath := SaveDialog.FileName;
+                SaveOriginalNetColors(NetList, ColorsPath);
+            end;
+
+            SaveDialog.Free;
+        end;
 
         // Clear processed lists
         ProcessedTracks.Clear;
@@ -1226,3 +1242,4 @@ Begin
         NetCapacities.Free;
     End;
 End;
+
