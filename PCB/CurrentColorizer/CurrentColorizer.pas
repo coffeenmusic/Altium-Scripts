@@ -120,6 +120,7 @@ Var
     row_idx : Integer;
     NetName : String;
     NetColor : Integer;
+    OpenDialog : TOpenDialog;
 Begin
     // Retrieve the current board
     Board := PCBServer.GetCurrentPCBBoard;
@@ -129,13 +130,23 @@ Begin
         Exit;
     end;
 
-    // Get script path
-    ScriptPath := ScriptProjectPath(GetWorkspace);
-    if ScriptPath = '' then
-        ScriptPath := '.'; // Use current directory if script path not found
+    // Create open dialog to prompt for CSV file
+    OpenDialog := TOpenDialog.Create(nil);
+    OpenDialog.Title := 'Select the original net colors CSV file to restore';
+    OpenDialog.Filter := 'CSV file|*.csv';
+    OpenDialog.DefaultExt := 'csv';
+    OpenDialog.FilterIndex := 0;
+    OpenDialog.FileName := DEFAULT_FILE; // Set default filename
 
-    // Set default file path to script project path
-    FilePath := ScriptPath + '\' + DEFAULT_FILE;
+    // If dialog is canceled, exit
+    if not OpenDialog.Execute then
+    begin
+        OpenDialog.Free;
+        ShowMessage('Operation canceled by user.');
+        Exit;
+    end;
+
+    FilePath := OpenDialog.FileName;
 
     // Create color map for lookup
     SavedColors := TStringList.Create;
@@ -220,6 +231,7 @@ Begin
         // Free string lists
         ColorMap.Free;
         RowData.Free;
+        OpenDialog.Free;
     End;
 End;
 
