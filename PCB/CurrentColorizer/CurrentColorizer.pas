@@ -37,8 +37,12 @@ End;
 
 {..............................................................................}
 { Get path of this script project.                                             }
+{ Get scripts' project path from:
+  Jeff Collins and William Kitchen's stripped down version}
 {..............................................................................}
 function ScriptProjectPath(Workspace: IWorkspace) : String;
+const
+  constScriptProjectName = 'CurrentColorizer';
 var
   Project   : IProject;
   scriptsPath : TDynamicString;

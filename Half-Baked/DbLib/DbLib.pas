@@ -12,6 +12,29 @@ Begin
                     Else Result := 'False';
 End;
 {..............................................................................}
+
+Function  TryOther(Db:IDatabaseLibDocument);
+Var
+    ConnStr     : WideString;
+    TableIdx    : Integer;
+    SQL         : WideString;
+    ErrMsg      : WideString;
+    RowCnt      : Integer;
+begin
+    TableIdx := Db.GetTableIndex('CAPACITORS_Query');        // name as shown in the Table Browser tab
+    SQL      := Db.GetCommandString(TableIdx, '',      // no filter-text (use the full table)
+                                    'WHERE Mfgr1=''KEMET''');
+
+    {---(3)  Execute it just to see how many parts match ---}
+    RowCnt := Db.GetItemCount(SQL, ErrMsg);
+    If ErrMsg <> '' Then
+        ShowMessage('SQL error: '+ErrMsg)
+    Else
+        ShowMessage('Rows found = '+IntToStr(RowCnt));
+
+end;
+
+
 {..............................................................................}
 Procedure Run;
 Var
@@ -25,8 +48,8 @@ Var
     LibPath, ParameterName, DesignParameterName,CmpParams        : String;
     DbLib          : IDatabaseLibDocument;
     AllCmps: IStrings;
-    CmpKeys: AComponentKeys;
-    CmpCnt: Integer;
+    CmpKeys: TStringList; //AComponentKeys;
+    CmpCnt,KeyFieldCnt: Integer;
     DbCmpParams, NewRecord: String;
     CommaDelimitedFieldValues : String;
     ALibCompReader : ILibCompInfoReader;
@@ -46,6 +69,8 @@ Begin
         Exit;
     End;
 
+    CmpKeys := TStringList.Create;
+
     IntMan := IntegratedLibraryManager;
     If IntMan = Nil Then Exit;
 
@@ -57,7 +82,7 @@ Begin
         DbLibReport.Add(LibPath);
 
         ALibCompReader := SchServer.CreateLibCompInfoReader(LibPath);
-        
+
         If ALibCompReader = Nil Then Exit;
 
         ALibCompReader.ReadAllComponentInfo;
@@ -67,18 +92,28 @@ Begin
         CmpCnt := IntMan.GetComponentCount(LibPath);
 
 
-        If (LibPath = '') Then Continue;
+        If (LibPath = '') Or (Not(AnsiEndsStr('.DbLib', LibPath))) Then Continue;
 
         DbLib := IntMan.GetAvailableDBLibDocAtPath(LibPath);  // IDatabaseLibDocument
+
+        TryOther(DbLib);
 
         For TableIdx := 0 to DbLib.GetTableCount - 1 Do
         Begin
              TableName := DbLib.GetTableNameAt(TableIdx);
-             //DbLib.GetAllComponentKeys(TableIdx, CmpKeys);
+             DbLib.GetAllComponentKeys(TableIdx, CmpKeys);
              //CmpParams := DbLib.GetParametersForComponent(TableIdx, CmpKeys);
              //SchServer.LoadComponentFromDatabaseLibrary(
              //IModelTypeManager.
 
+             KeyFieldCnt := DbLib.GetKeyFieldCount(TableIdx);
+
+             If KeyFieldCnt = 0 Then Continue;
+
+             For KeyIdx := 0 to KeyFieldCnt - 1 Do
+             Begin
+                  KeyField := DbLib.GetKeyField(False, TableIdx, KeyIdx);
+             End;
 
              If DbLib.GetFieldCount(TableIdx) = 0 Then Continue;
 
@@ -117,5 +152,7 @@ Begin
              End;
         End;
     End;
+
+    CmpKeys.Free;
     DbLibReport.SaveToFile('C:\Users\Stephen Thompson\Downloads\DbLib_Report.Txt');
 End;
