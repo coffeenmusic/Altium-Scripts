@@ -1,5 +1,3 @@
-
-
 // Check if two layers are the on the same side of the board. Handle different layer names.
 function Is_Same_Side(Obj1: IPCB_ObjectClass, Obj2: IPCB_ObjectClass): Boolean;
 var
@@ -157,17 +155,23 @@ end;
 
 function PolyOverPadWidth(Board: IPCB_Board, Pad: IPCB_Pad): Integer;
 var
-    Iterator      : IPCB_SpatialIterator;
+    PolyIterator  : IPCB_BoardIterator;
     Poly          : IPCB_Polygon;
-    PolyTrack     : IPCB_Object;
-    Rect : TCoordRect;
+    PolyGroupIter : IPCB_GroupIterator;
+    PolyPrimitive : IPCB_Object;
+    Region        : IPCB_Region;
+    Rect          : TCoordRect;
     RectL,RectR,RectB,RectT : TCoord;
     Width : Integer;
-    Coord : IPCB_Coordinate;
-    ReliefCnt : Integer;
-    ReliefWidth : Integer;
-    TrackSize : TCoord;
-    PolyTrackIter : IPCB_GroupIterator;
+    PadCx, PadCy : TCoord;
+    ThermalWidth : Integer;
+    i, j : Integer;
+    HoleContour : IPCB_Contour;
+    MainContour : IPCB_Contour;
+    MinX, MaxX, MinY, MaxY : TCoord;
+    HoleCx, HoleCy : TCoord;
+    NumSpokes : Integer;
+    EstimatedSpokeWidth : Integer;
 begin
     Rect := Get_Obj_Rect(Pad);
     RectL := Rect.Left;
@@ -175,48 +179,132 @@ begin
     RectT := Rect.Top;
     RectB := Rect.Bottom;
 
-    Iterator := Board.BoardIterator_Create;
-    Iterator.AddFilter_ObjectSet(MkSet(ePolyObject));
-    Iterator.AddFilter_LayerSet(MkSet(eTopLayer, eBottomLayer));
-    Iterator.AddFilter_Method(eProcessAll);
+    // Get pad center for distance calculations
+    PadCx := (RectL + RectR) div 2;
+    PadCy := (RectT + RectB) div 2;
+
+    // Use board iterator to find all polygons
+    PolyIterator := Board.BoardIterator_Create;
+    PolyIterator.AddFilter_ObjectSet(MkSet(ePolyObject));
+    PolyIterator.AddFilter_LayerSet(MkSet(eTopLayer, eBottomLayer));
+    PolyIterator.AddFilter_Method(eProcessAll);
 
     Width := 0;
-    Poly := Iterator.FirstPCBObject;
+    Poly := PolyIterator.FirstPCBObject;
     While Poly <> NIL Do
     Begin
-        If Poly.Layer = Pad.Layer Then
+        // Check if polygon is on same layer and net as pad
+        // This is the primary check - if they're on same net, thermal relief would apply
+        If (Poly.Layer = Pad.Layer) and (Poly.Net = Pad.Net) Then
         Begin
-        //    Poly.Selected := True;
-        //    ReliefCnt := Poly.ReliefEntries;
-        //    ReliefWidth := Poly.ReliefConductorWidth;
-        //    TrackSize := Poly.TrackSize;
-            //Width := Width + CoordToMils(Poly.Width);
-        //    Width := ReliefWidth;
-        //    Client.SendMessage('PCB:Zoom', 'Action=Selected' , 255, Client.CurrentView);
-        //    Poly.Selected := False;
-        //End;
-        //Poly.Selected := True;
-        //Client.SendMessage('PCB:Zoom', 'Action=Selected' , 255, Client.CurrentView);
+            ThermalWidth := 0;
 
-        //ShowMessage(BoolToStr(Poly.PrimitiveInsidePoly(Pad)));
-        //Poly.Selected := False;
+            // For solid polygons, get the Region object and analyze it
+            If Poly.PolyHatchStyle = ePolySolid Then
+            Begin
+                // Create group iterator to access polygon's Region primitives
+                PolyGroupIter := Poly.GroupIterator_Create;
+                PolyGroupIter.AddFilter_ObjectSet(MkSet(eRegionObject));
 
-        PolyTrackIter := Poly.GroupIterator_Create;
-        PolyTrackIter.AddFilter_ObjectSet(MkSet(ePadObject, eTrackObject, eComponentObject));
+                PolyPrimitive := PolyGroupIter.FirstPCBObject;
+                While PolyPrimitive <> NIL Do
+                Begin
+                    If PolyPrimitive.ObjectId = eRegionObject Then
+                    Begin
+                        Region := PolyPrimitive;
 
-        PolyTrack := PolyTrackIter.FirstPCBObject;
-        While PolyTrack <> NIL Do
-        Begin
-            PolyTrack.Selected := True;
+                        // Check each hole in the region to see if it's around our pad
+                        // Thermal reliefs create holes around pads with narrow bridges
+                        For i := 0 To Region.HoleCount - 1 Do
+                        Begin
+                            HoleContour := Region.Holes[i];
 
-            PolyTrack := PolyTrackIter.NextPCBObject;
+                            // Calculate bounding box of the hole manually
+                            If HoleContour.Count > 0 Then
+                            Begin
+                                MinX := HoleContour.x[0];
+                                MaxX := HoleContour.x[0];
+                                MinY := HoleContour.y[0];
+                                MaxY := HoleContour.y[0];
+
+                                For j := 1 To HoleContour.Count - 1 Do
+                                Begin
+                                    If HoleContour.x[j] < MinX Then MinX := HoleContour.x[j];
+                                    If HoleContour.x[j] > MaxX Then MaxX := HoleContour.x[j];
+                                    If HoleContour.y[j] < MinY Then MinY := HoleContour.y[j];
+                                    If HoleContour.y[j] > MaxY Then MaxY := HoleContour.y[j];
+                                End;
+
+                                // Calculate hole center
+                                HoleCx := (MinX + MaxX) div 2;
+                                HoleCy := (MinY + MaxY) div 2;
+
+                                // Check if this hole is centered around our pad
+                                // Allow some tolerance for the hole to be slightly offset
+                                If (Abs(HoleCx - PadCx) < MilsToCoord(20)) and
+                                   (Abs(HoleCy - PadCy) < MilsToCoord(20)) Then
+                                Begin
+                                    // This hole is likely a thermal relief around our pad
+                                    // The thermal spokes are the copper that remains between the hole and pad
+
+                                    // Use polygon's relief conductor width if available
+                                    If Poly.ReliefConductorWidth > 0 Then
+                                    Begin
+                                        // Polygon has defined relief conductor width
+                                        NumSpokes := Poly.ReliefEntries;
+                                        If NumSpokes <= 0 Then NumSpokes := 4; // Default to 4 spokes
+                                        ThermalWidth := CoordToMils(Poly.ReliefConductorWidth) * NumSpokes;
+                                    End
+                                    Else
+                                    Begin
+                                        // Estimate based on typical thermal patterns
+                                        // Usually 4 spokes of about 10-20 mils each for small components
+                                        ThermalWidth := 40; // Conservative estimate: 4 spokes × 10 mils
+                                    End;
+
+                                    Break; // Found the thermal relief hole for this pad
+                                End;
+                            End;
+                        End;
+                    End;
+
+                    PolyPrimitive := PolyGroupIter.NextPCBObject;
+                End;
+
+                Poly.GroupIterator_Destroy(PolyGroupIter);
+            End
+            // For hatched polygons, the tracks ARE the copper pattern
+            Else If (Poly.PolyHatchStyle <> ePolyNoHatch) Then
+            Begin
+                // For hatched polygons, check if there are track primitives
+                PolyGroupIter := Poly.GroupIterator_Create;
+                PolyGroupIter.AddFilter_ObjectSet(MkSet(eTrackObject));
+
+                PolyPrimitive := PolyGroupIter.FirstPCBObject;
+                While PolyPrimitive <> NIL Do
+                Begin
+                    If PolyPrimitive.ObjectId = eTrackObject Then
+                    Begin
+                        // Check if track connects to pad
+                        If TrackInPad(Board, Pad, PolyPrimitive) Then
+                        Begin
+                            ThermalWidth := ThermalWidth + CoordToMils(PolyPrimitive.Width);
+                        End;
+                    End;
+
+                    PolyPrimitive := PolyGroupIter.NextPCBObject;
+                End;
+
+                Poly.GroupIterator_Destroy(PolyGroupIter);
+            End;
+
+            // Add thermal width from this polygon to total
+            Width := Width + ThermalWidth;
         End;
-        Poly.GroupIterator_Destroy(PolyTrackIter);
-        End;
 
-        Poly := Iterator.NextPCBObject;
+        Poly := PolyIterator.NextPCBObject;
     End;
-    Board.SpatialIterator_Destroy(Iterator);
+    Board.BoardIterator_Destroy(PolyIterator);
 
     result := Width;
 end;
@@ -234,7 +322,7 @@ begin
     Pad := PadIterator.FirstPCBObject;
     While (Pad <> Nil) Do
     Begin
-        If Pad.Layer = eTopLayer Then
+        If Pad.Layer = Cmp.Layer Then
         Begin
             Inc(PadCnt);
         End;
@@ -245,7 +333,7 @@ begin
     result := PadCnt;
 end;
 
-function Get_Thermal_Ratio(Board: IPCB_Board, Cmp: IPCB_Component): Integer;
+function Get_Thermal_Ratio(Board: IPCB_Board, Cmp: IPCB_Component): Double;
 var
     Cnt1, Cnt2 : Integer;
     PadIterator     : IPCB_GroupIterator;
@@ -254,6 +342,7 @@ var
     Track : IPCB_Track;
     Ratio :   Double;
     W1, W2, Width : Integer;
+    TrackWidth, PolyWidth : Integer;
     StringDes : TPCBString;
     PadCnt : Integer;
 begin
@@ -271,8 +360,11 @@ begin
         If Pad.Layer = Cmp.Layer Then
         Begin
             StringDes := Pad.Name;
-            Width := TrackOverPadWidth(Board, Pad);
-            //PolyOverPadWidth(Board, Pad);
+
+            // Get width from both tracks and polygons
+            TrackWidth := TrackOverPadWidth(Board, Pad);
+            PolyWidth := PolyOverPadWidth(Board, Pad);
+            Width := TrackWidth + PolyWidth;
 
             If PadCnt = 1 Then
             Begin
@@ -288,7 +380,7 @@ begin
     End;
     Cmp.GroupIterator_Destroy(PadIterator);
 
-    // If infinite ratio
+    // If infinite ratio (one pad has no thermal connection)
     If (W1 = 0) or (W2 = 0) Then
     Begin
         result := 1000000; // Large arbitrary number
@@ -327,6 +419,9 @@ Begin
     Board := PCBServer.GetCurrentPCBBoard;
     If Board = Nil Then Exit;
 
+    ShowMessage('Tombstone Finder: Checking for thermal imbalance in small components.' + #13#10 +
+                'Now includes polygon thermal relief analysis.');
+
     // Create the iterator that will look for Component Body objects only
     Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eComponentObject));
@@ -353,9 +448,12 @@ Begin
                            Des := Cmp.Name.Text;
                            Cmp.Selected := True;
                            Client.SendMessage('PCB:Zoom', 'Action=Selected' , 255, Client.CurrentView);
-                           KeepRunning := ConfirmNoYes('Thermal Ratio: ' + FloatToStr(Ratio) + '  Continue?');
+                           KeepRunning := ConfirmNoYes('Component: ' + Des + #13#10 +
+                                                       'Thermal Ratio: ' + FloatToStr(Ratio) + #13#10 +
+                                                       '(Includes tracks and polygon thermals)' + #13#10#13#10 +
+                                                       'Continue searching?');
                            If not(KeepRunning) Then
-                               Break;
+                               Exit;
                            Cmp.Selected := False;
                         End;
                     End;
@@ -366,7 +464,7 @@ Begin
     End;
     Board.BoardIterator_Destroy(Iterator);
 
-    ShowMessage('Script Complete.');
+    ShowMessage('Tombstone check complete.');
 End;
 {..............................................................................}
 
