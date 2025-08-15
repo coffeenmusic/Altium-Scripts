@@ -419,8 +419,7 @@ Begin
     Board := PCBServer.GetCurrentPCBBoard;
     If Board = Nil Then Exit;
 
-    ShowMessage('Tombstone Finder: Checking for thermal imbalance in small components.' + #13#10 +
-                'Now includes polygon thermal relief analysis.');
+    ShowMessage('Tombstone Finder: Checking for thermal imbalance in small components. Showing width ratios greater than ' + FloatToStr(MAX_RATIO));
 
     // Create the iterator that will look for Component Body objects only
     Iterator := Board.BoardIterator_Create;
