@@ -82,15 +82,12 @@ Var
     NoteYCoords     : TStringList;
     NoteSizes       : TStringList;
 
-    // Lists for numbered notes to find median
-    NumberedNoteXCoords : TStringList;
-
     // Variables for processing
     I, J            : Integer;
-    MedianX         : Float;
     OriginX, OriginY: Float;
     CharWidth       : Float;
     FirstNoteSize   : Float;
+    Note1X          : Float;
     Note1Y          : Float;
     Note1Found      : Boolean;
 
@@ -115,7 +112,6 @@ Var
     CurrentX        : Float;
     CurrentSize     : Float;
     NoteNumber      : Integer;
-    XSum            : Float;
     MinX            : Float;
     MaxY            : Float;
 Begin
@@ -132,9 +128,9 @@ Begin
     NoteXCoords := TStringList.Create;
     NoteYCoords := TStringList.Create;
     NoteSizes := TStringList.Create;
-    NumberedNoteXCoords := TStringList.Create;
 
     Note1Found := False;
+    Note1X := 0;
     Note1Y := 0;
     FirstNoteSize := 50; // Default in mils
 
@@ -165,14 +161,9 @@ Begin
             If NoteNumber = 1 Then
             Begin
                 Note1Found := True;
+                Note1X := CurrentX;
                 Note1Y := CurrentY;
                 FirstNoteSize := CurrentSize;
-            End;
-
-            // Collect X values for numbered notes to calculate median
-            If StartsWithNumberAndPeriod(Text.Text) Then
-            Begin
-                NumberedNoteXCoords.Add(FloatToStr(CurrentX));
             End;
         End;
         Text := Iterator.NextPCBObject;
@@ -186,33 +177,38 @@ Begin
         NoteXCoords.Free;
         NoteYCoords.Free;
         NoteSizes.Free;
-        NumberedNoteXCoords.Free;
         Exit;
     End;
 
-    // Calculate median X for numbered notes
-    If NumberedNoteXCoords.Count > 0 Then
-    Begin
-        // Calculate average as approximation of median (simpler than sorting)
-        XSum := 0;
-        For I := 0 to NumberedNoteXCoords.Count - 1 Do
-            XSum := XSum + StrToFloat(NumberedNoteXCoords.Strings[I]);
-        MedianX := XSum / NumberedNoteXCoords.Count;
-    End
+    // Set X origin from Note 1 if it exists, otherwise use leftmost numbered note
+    If Note1Found Then
+        OriginX := Note1X
     Else
     Begin
-        // Fallback: use leftmost X coordinate
-        MinX := StrToFloat(NoteXCoords.Strings[0]);
-        For I := 1 to NoteXCoords.Count - 1 Do
+        // Fallback: find leftmost numbered note
+        MinX := 99999;
+        For I := 0 to NoteTexts.Count - 1 Do
         Begin
-            CurrentX := StrToFloat(NoteXCoords.Strings[I]);
-            If CurrentX < MinX Then
-                MinX := CurrentX;
+            If StartsWithNumberAndPeriod(NoteTexts.Strings[I]) Then
+            Begin
+                CurrentX := StrToFloat(NoteXCoords.Strings[I]);
+                If CurrentX < MinX Then
+                    MinX := CurrentX;
+            End;
         End;
-        MedianX := MinX;
+        // If no numbered notes found, use leftmost of all notes
+        If MinX = 99999 Then
+        Begin
+            MinX := StrToFloat(NoteXCoords.Strings[0]);
+            For I := 1 to NoteXCoords.Count - 1 Do
+            Begin
+                CurrentX := StrToFloat(NoteXCoords.Strings[I]);
+                If CurrentX < MinX Then
+                    MinX := CurrentX;
+            End;
+        End;
+        OriginX := MinX;
     End;
-
-    OriginX := MedianX;
 
     // Find Y origin from Note 1 if it exists, otherwise use highest Y (since we're sorting descending)
     If Note1Found Then
@@ -230,7 +226,7 @@ Begin
     End;
 
     // Calculate character width and line spacing
-    CharWidth := FirstNoteSize * 0.6;  // Estimate character width
+    CharWidth := FirstNoteSize;  // Use size directly for spacing calculation
     LineGap := FirstNoteSize * 1.5;    // Line spacing
 
     // Simple bubble sort by Y coordinate (descending order - highest Y first)
@@ -285,7 +281,8 @@ Begin
         For J := 1 to BlankLines Do
             OutputList.Add('');
 
-        // Calculate horizontal spacing
+        // Calculate horizontal spacing based on offset from note "1." position
+        // Example: if text is 300 mils to the right and size is 50, we get 6 spaces
         SpaceCount := Round((CurrentX - OriginX) / CharWidth);
         If SpaceCount < 0 Then SpaceCount := 0;
 
@@ -315,6 +312,5 @@ Begin
     NoteXCoords.Free;
     NoteYCoords.Free;
     NoteSizes.Free;
-    NumberedNoteXCoords.Free;
 End;
 {..............................................................................}
