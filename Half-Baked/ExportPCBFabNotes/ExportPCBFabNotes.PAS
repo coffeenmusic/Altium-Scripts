@@ -94,6 +94,7 @@ Var
     OutputList      : TStringList;
     FileName        : String;
     CurrentLine     : String;
+    SaveDialog      : TSaveDialog;
     SpaceCount      : Integer;
     LastY           : Float;
     LineGap         : Float;
@@ -353,12 +354,28 @@ Begin
     OutputList.Add('Total Notes: ' + IntToStr(NoteTexts.Count));
     OutputList.Add('Exported: ' + DateTimeToStr(Now));
 
-    // Save to file
-    FileName := ChangeFileExt(Board.FileName, '_FabNotes.txt');
-    OutputList.SaveToFile(FileName);
+    // Open Save File Dialog
+    SaveDialog := TSaveDialog.Create(Nil);
+    SaveDialog.Title := 'Please select a location and filename for the exported fab notes';
+    SaveDialog.Filter := 'Text file|*.txt|All files|*.*';
+    SaveDialog.DefaultExt := 'txt';
+    SaveDialog.FilterIndex := 0;
+    SaveDialog.FileName := ChangeFileExt(ExtractFileName(Board.FileName), '_FabNotes.txt');
 
-    ShowMessage('Fab notes exported successfully to:' + #13#10 + FileName + #13#10 +
-               'Total notes exported: ' + IntToStr(NoteTexts.Count));
+    If SaveDialog.Execute Then
+    Begin
+        FileName := SaveDialog.FileName;
+        OutputList.SaveToFile(FileName);
+
+        ShowMessage('Fab notes exported successfully to:' + #13#10 + FileName + #13#10 +
+                   'Total notes exported: ' + IntToStr(NoteTexts.Count));
+    End
+    Else
+    Begin
+        ShowMessage('Export cancelled.');
+    End;
+
+    SaveDialog.Free;
 
     // Clean up
     OutputList.Free;
