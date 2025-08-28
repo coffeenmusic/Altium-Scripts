@@ -117,7 +117,7 @@ Var
     NoteNumber      : Integer;
     XSum            : Float;
     MinX            : Float;
-    MinY            : Float;
+    MaxY            : Float;
 Begin
     // Retrieve the current board
     Board := PCBServer.GetCurrentPCBBoard;
@@ -214,26 +214,26 @@ Begin
 
     OriginX := MedianX;
 
-    // Find Y origin from Note 1 if it exists, otherwise use topmost Y
+    // Find Y origin from Note 1 if it exists, otherwise use highest Y (since we're sorting descending)
     If Note1Found Then
         OriginY := Note1Y
     Else
     Begin
-        MinY := StrToFloat(NoteYCoords.Strings[0]);
+        MaxY := StrToFloat(NoteYCoords.Strings[0]);
         For I := 1 to NoteYCoords.Count - 1 Do
         Begin
             CurrentY := StrToFloat(NoteYCoords.Strings[I]);
-            If CurrentY < MinY Then
-                MinY := CurrentY;
+            If CurrentY > MaxY Then
+                MaxY := CurrentY;
         End;
-        OriginY := MinY;
+        OriginY := MaxY;
     End;
 
     // Calculate character width and line spacing
     CharWidth := FirstNoteSize * 0.6;  // Estimate character width
     LineGap := FirstNoteSize * 1.5;    // Line spacing
 
-    // Simple bubble sort by Y coordinate
+    // Simple bubble sort by Y coordinate (descending order - highest Y first)
     For I := 0 to NoteTexts.Count - 2 Do
     Begin
         For J := 0 to NoteTexts.Count - 2 - I Do
@@ -241,7 +241,7 @@ Begin
             CurrentY := StrToFloat(NoteYCoords.Strings[J]);
             CompareY := StrToFloat(NoteYCoords.Strings[J + 1]);
 
-            If CurrentY > CompareY Then
+            If CurrentY < CompareY Then
             Begin
                 // Swap all related data
                 TempText := NoteTexts.Strings[J];
@@ -277,8 +277,8 @@ Begin
         CurrentX := StrToFloat(NoteXCoords.Strings[I]);
         CurrentY := StrToFloat(NoteYCoords.Strings[I]);
 
-        // Calculate blank lines based on Y gap
-        BlankLines := Round((CurrentY - LastY) / LineGap) - 1;
+        // Calculate blank lines based on Y gap (reversed since we're going high to low)
+        BlankLines := Round((LastY - CurrentY) / LineGap) - 1;
         If BlankLines < 0 Then BlankLines := 0;
 
         // Add blank lines for vertical spacing
