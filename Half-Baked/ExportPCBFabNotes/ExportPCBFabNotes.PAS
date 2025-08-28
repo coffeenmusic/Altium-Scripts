@@ -1,8 +1,7 @@
 {..............................................................................}
 { Summary: Exports PCB Fab Notes from text objects to a formatted text file    }
 {          Converts X/Y coordinates to spaces and lines in text file           }
-{ Version 1.0                                                                   }
-{ Based on user requirements for spatial text arrangement                      }
+{ Version 2.0 - Groups text at same Y coordinate on same line                  }
 {..............................................................................}
 
 {..............................................................................}
@@ -83,7 +82,7 @@ Var
     NoteSizes       : TStringList;
 
     // Variables for processing
-    I, J            : Integer;
+    I, J, K         : Integer;
     OriginX, OriginY: Float;
     CharWidth       : Float;
     FirstNoteSize   : Float;
@@ -107,6 +106,15 @@ Var
     TempSize        : String;
     CurrentY        : Float;
     CompareY        : Float;
+
+    // For grouping by Y
+    YTolerance      : Float;
+    LineYGroups     : TStringList;  // Stores unique Y values
+    CurrentLineItems: TStringList;  // Stores items for current line
+    CurrentLineX    : TStringList;  // X coords for current line items
+    GroupY          : Float;
+    ItemX           : Float;
+    LastX           : Float;
 
     // Temp variables
     CurrentX        : Float;
@@ -210,7 +218,7 @@ Begin
         OriginX := MinX;
     End;
 
-    // Find Y origin from Note 1 if it exists, otherwise use highest Y (since we're sorting descending)
+    // Find Y origin from Note 1 if it exists, otherwise use highest Y
     If Note1Found Then
         OriginY := Note1Y
     Else
@@ -228,16 +236,21 @@ Begin
     // Calculate character width and line spacing
     CharWidth := FirstNoteSize;  // Use size directly for spacing calculation
     LineGap := FirstNoteSize * 1.5;    // Line spacing
+    YTolerance := FirstNoteSize * 0.25; // Tolerance for grouping items at same Y
 
-    // Simple bubble sort by Y coordinate (descending order - highest Y first)
+    // Sort by Y coordinate (descending) then by X coordinate within each Y group
     For I := 0 to NoteTexts.Count - 2 Do
     Begin
         For J := 0 to NoteTexts.Count - 2 - I Do
         Begin
             CurrentY := StrToFloat(NoteYCoords.Strings[J]);
             CompareY := StrToFloat(NoteYCoords.Strings[J + 1]);
+            CurrentX := StrToFloat(NoteXCoords.Strings[J]);
+            ItemX := StrToFloat(NoteXCoords.Strings[J + 1]);
 
-            If CurrentY < CompareY Then
+            // Sort by Y descending, then by X ascending
+            If (CurrentY < CompareY) Or
+               ((Abs(CurrentY - CompareY) < YTolerance) And (CurrentX > ItemX)) Then
             Begin
                 // Swap all related data
                 TempText := NoteTexts.Strings[J];
@@ -260,37 +273,78 @@ Begin
 
     // Create output string list
     OutputList := TStringList.Create;
+    LineYGroups := TStringList.Create;
+    CurrentLineItems := TStringList.Create;
+    CurrentLineX := TStringList.Create;
 
     OutputList.Add('PCB Fabrication Notes');
     OutputList.Add('======================');
     OutputList.Add('');
 
     LastY := OriginY;
+    I := 0;
 
-    // Process each note
-    For I := 0 to NoteTexts.Count - 1 Do
+    // Process notes, grouping by Y coordinate
+    While I < NoteTexts.Count Do
     Begin
-        CurrentX := StrToFloat(NoteXCoords.Strings[I]);
-        CurrentY := StrToFloat(NoteYCoords.Strings[I]);
+        CurrentLineItems.Clear;
+        CurrentLineX.Clear;
 
-        // Calculate blank lines based on Y gap (reversed since we're going high to low)
-        BlankLines := Round((LastY - CurrentY) / LineGap) - 1;
+        // Get the Y coordinate for this group
+        GroupY := StrToFloat(NoteYCoords.Strings[I]);
+
+        // Calculate blank lines based on Y gap from last group
+        BlankLines := Round((LastY - GroupY) / LineGap) - 1;
         If BlankLines < 0 Then BlankLines := 0;
 
         // Add blank lines for vertical spacing
         For J := 1 to BlankLines Do
             OutputList.Add('');
 
-        // Calculate horizontal spacing based on offset from note "1." position
-        // Example: if text is 300 mils to the right and size is 50, we get 6 spaces
-        SpaceCount := Round((CurrentX - OriginX) / CharWidth);
-        If SpaceCount < 0 Then SpaceCount := 0;
+        // Collect all items at this Y coordinate (within tolerance)
+        While (I < NoteTexts.Count) Do
+        Begin
+            CurrentY := StrToFloat(NoteYCoords.Strings[I]);
+            If Abs(CurrentY - GroupY) < YTolerance Then
+            Begin
+                CurrentLineItems.Add(NoteTexts.Strings[I]);
+                CurrentLineX.Add(NoteXCoords.Strings[I]);
+                Inc(I);
+            End
+            Else
+                Break;
+        End;
 
-        // Create line with appropriate spacing
-        CurrentLine := CreateSpaces(SpaceCount) + NoteTexts.Strings[I];
+        // Build the line with all items at this Y coordinate
+        CurrentLine := '';
+        LastX := OriginX;
+
+        For K := 0 to CurrentLineItems.Count - 1 Do
+        Begin
+            ItemX := StrToFloat(CurrentLineX.Strings[K]);
+
+            // Calculate spaces from last position or origin
+            If K = 0 Then
+            Begin
+                // First item on line - calculate from origin
+                SpaceCount := Round((ItemX - OriginX) / CharWidth);
+                If SpaceCount < 0 Then SpaceCount := 0;
+                CurrentLine := CreateSpaces(SpaceCount) + CurrentLineItems.Strings[K];
+            End
+            Else
+            Begin
+                // Subsequent items - calculate from end of previous item
+                // Estimate text length as number of characters
+                SpaceCount := Round((ItemX - LastX) / CharWidth) - Length(CurrentLineItems.Strings[K - 1]);
+                If SpaceCount < 1 Then SpaceCount := 1; // At least one space between items
+                CurrentLine := CurrentLine + CreateSpaces(SpaceCount) + CurrentLineItems.Strings[K];
+            End;
+
+            LastX := ItemX;
+        End;
+
         OutputList.Add(CurrentLine);
-
-        LastY := CurrentY;
+        LastY := GroupY;
     End;
 
     // Add footer
@@ -308,6 +362,9 @@ Begin
 
     // Clean up
     OutputList.Free;
+    LineYGroups.Free;
+    CurrentLineItems.Free;
+    CurrentLineX.Free;
     NoteTexts.Free;
     NoteXCoords.Free;
     NoteYCoords.Free;
