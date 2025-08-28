@@ -1,42 +1,320 @@
 {..............................................................................}
-{ Summary Iterates Nets of the current PCB document.                            }
-{ Copyright (c) 2004 by Altium Limited                                         }
+{ Summary: Exports PCB Fab Notes from text objects to a formatted text file    }
+{          Converts X/Y coordinates to spaces and lines in text file           }
+{ Version 1.0                                                                   }
+{ Based on user requirements for spatial text arrangement                      }
+{..............................................................................}
+
+{..............................................................................}
+Function StartsWithNumberAndPeriod(Text : String) : Boolean;
+Var
+    I : Integer;
+    HasNumber : Boolean;
+Begin
+    Result := False;
+    HasNumber := False;
+
+    // Check if starts with number(s) followed by period
+    For I := 1 to Length(Text) Do
+    Begin
+        If (Text[I] >= '0') And (Text[I] <= '9') Then
+            HasNumber := True
+        Else If (Text[I] = '.') And HasNumber Then
+        Begin
+            Result := True;
+            Break;
+        End
+        Else If Text[I] <> ' ' Then  // Allow leading spaces
+            Break;
+    End;
+End;
+{..............................................................................}
+
+{..............................................................................}
+Function GetNumberFromNote(NoteText : String) : Integer;
+Var
+    I : Integer;
+    NumStr : String;
+Begin
+    Result := -1;
+    NumStr := '';
+
+    // Extract number before the period
+    For I := 1 to Length(NoteText) Do
+    Begin
+        If NoteText[I] = '.' Then
+        Begin
+            If NumStr <> '' Then
+            Begin
+                Result := StrToInt(NumStr);
+            End;
+            Break;
+        End
+        Else If (NoteText[I] >= '0') And (NoteText[I] <= '9') Then
+            NumStr := NumStr + NoteText[I]
+        Else
+            Break;
+    End;
+End;
+{..............................................................................}
+
+{..............................................................................}
+Function CreateSpaces(Count : Integer) : String;
+Var
+    I : Integer;
+Begin
+    Result := '';
+    For I := 1 to Count Do
+        Result := Result + ' ';
+End;
+{..............................................................................}
+
 {..............................................................................}
 Procedure Run;
 Var
-    Board       : IPCB_Board;
-    Text         : IPCB_Text;
-    Iterator    : IPCB_BoardIterator;
-    Identifier : String;
-    X, Y : Float;
-    Size, Width: Integer;
+    Board           : IPCB_Board;
+    Text            : IPCB_Text;
+    Iterator        : IPCB_BoardIterator;
+
+    // Lists to store note data
+    NoteTexts       : TStringList;
+    NoteXCoords     : TStringList;
+    NoteYCoords     : TStringList;
+    NoteSizes       : TStringList;
+
+    // Lists for numbered notes to find median
+    NumberedNoteXCoords : TStringList;
+
+    // Variables for processing
+    I, J            : Integer;
+    MedianX         : Float;
+    OriginX, OriginY: Float;
+    CharWidth       : Float;
+    FirstNoteSize   : Float;
+    Note1Y          : Float;
+    Note1Found      : Boolean;
+
+    // For output
+    OutputList      : TStringList;
+    FileName        : String;
+    CurrentLine     : String;
+    SpaceCount      : Integer;
+    LastY           : Float;
+    LineGap         : Float;
+    BlankLines      : Integer;
+
+    // For sorting
+    TempText        : String;
+    TempX           : String;
+    TempY           : String;
+    TempSize        : String;
+    CurrentY        : Float;
+    CompareY        : Float;
+
+    // Temp variables
+    CurrentX        : Float;
+    CurrentSize     : Float;
+    NoteNumber      : Integer;
+    XSum            : Float;
+    MinX            : Float;
+    MinY            : Float;
 Begin
     // Retrieve the current board
     Board := PCBServer.GetCurrentPCBBoard;
-    If Board = Nil Then Exit;
+    If Board = Nil Then
+    Begin
+        ShowMessage('No PCB board found!');
+        Exit;
+    End;
 
-    // Create the iterator that will look for Net objects only
-    Iterator        := Board.BoardIterator_Create;
+    // Initialize string lists
+    NoteTexts := TStringList.Create;
+    NoteXCoords := TStringList.Create;
+    NoteYCoords := TStringList.Create;
+    NoteSizes := TStringList.Create;
+    NumberedNoteXCoords := TStringList.Create;
+
+    Note1Found := False;
+    Note1Y := 0;
+    FirstNoteSize := 50; // Default in mils
+
+    // Create the iterator to look for Text objects on Mechanical2 layer
+    Iterator := Board.BoardIterator_Create;
     Iterator.AddFilter_ObjectSet(MkSet(eTextObject));
     Iterator.AddFilter_LayerSet(MkSet(eMechanical2));
     Iterator.AddFilter_Method(eProcessAll);
 
-    // Search for Net objects and get their Net Name values
+    // Collect all fab notes
     Text := Iterator.FirstPCBObject;
     While (Text <> Nil) Do
     Begin
-
         If Not(Text.InComponent) And (Text.IsFreePrimitive) Then
         Begin
-            X := CoordToMils(Text.XLocation - Board.XOrigin);
-            Y := CoordToMils(Text.YLocation - Board.YOrigin);
-        End;        
+            // Store text data
+            NoteTexts.Add(Text.Text);
+            CurrentX := CoordToMils(Text.XLocation - Board.XOrigin);
+            CurrentY := CoordToMils(Text.YLocation - Board.YOrigin);
+            CurrentSize := CoordToMils(Text.Size);
 
+            NoteXCoords.Add(FloatToStr(CurrentX));
+            NoteYCoords.Add(FloatToStr(CurrentY));
+            NoteSizes.Add(FloatToStr(CurrentSize));
+
+            // Check if this is note "1."
+            NoteNumber := GetNumberFromNote(Text.Text);
+            If NoteNumber = 1 Then
+            Begin
+                Note1Found := True;
+                Note1Y := CurrentY;
+                FirstNoteSize := CurrentSize;
+            End;
+
+            // Collect X values for numbered notes to calculate median
+            If StartsWithNumberAndPeriod(Text.Text) Then
+            Begin
+                NumberedNoteXCoords.Add(FloatToStr(CurrentX));
+            End;
+        End;
         Text := Iterator.NextPCBObject;
     End;
     Board.BoardIterator_Destroy(Iterator);
- End;
-{..............................................................................}
 
-{..............................................................................}
+    If NoteTexts.Count = 0 Then
+    Begin
+        ShowMessage('No fab notes found on Mechanical2 layer!');
+        NoteTexts.Free;
+        NoteXCoords.Free;
+        NoteYCoords.Free;
+        NoteSizes.Free;
+        NumberedNoteXCoords.Free;
+        Exit;
+    End;
 
+    // Calculate median X for numbered notes
+    If NumberedNoteXCoords.Count > 0 Then
+    Begin
+        // Calculate average as approximation of median (simpler than sorting)
+        XSum := 0;
+        For I := 0 to NumberedNoteXCoords.Count - 1 Do
+            XSum := XSum + StrToFloat(NumberedNoteXCoords.Strings[I]);
+        MedianX := XSum / NumberedNoteXCoords.Count;
+    End
+    Else
+    Begin
+        // Fallback: use leftmost X coordinate
+        MinX := StrToFloat(NoteXCoords.Strings[0]);
+        For I := 1 to NoteXCoords.Count - 1 Do
+        Begin
+            CurrentX := StrToFloat(NoteXCoords.Strings[I]);
+            If CurrentX < MinX Then
+                MinX := CurrentX;
+        End;
+        MedianX := MinX;
+    End;
+
+    OriginX := MedianX;
+
+    // Find Y origin from Note 1 if it exists, otherwise use topmost Y
+    If Note1Found Then
+        OriginY := Note1Y
+    Else
+    Begin
+        MinY := StrToFloat(NoteYCoords.Strings[0]);
+        For I := 1 to NoteYCoords.Count - 1 Do
+        Begin
+            CurrentY := StrToFloat(NoteYCoords.Strings[I]);
+            If CurrentY < MinY Then
+                MinY := CurrentY;
+        End;
+        OriginY := MinY;
+    End;
+
+    // Calculate character width and line spacing
+    CharWidth := FirstNoteSize * 0.6;  // Estimate character width
+    LineGap := FirstNoteSize * 1.5;    // Line spacing
+
+    // Simple bubble sort by Y coordinate
+    For I := 0 to NoteTexts.Count - 2 Do
+    Begin
+        For J := 0 to NoteTexts.Count - 2 - I Do
+        Begin
+            CurrentY := StrToFloat(NoteYCoords.Strings[J]);
+            CompareY := StrToFloat(NoteYCoords.Strings[J + 1]);
+
+            If CurrentY > CompareY Then
+            Begin
+                // Swap all related data
+                TempText := NoteTexts.Strings[J];
+                TempX := NoteXCoords.Strings[J];
+                TempY := NoteYCoords.Strings[J];
+                TempSize := NoteSizes.Strings[J];
+
+                NoteTexts.Strings[J] := NoteTexts.Strings[J + 1];
+                NoteXCoords.Strings[J] := NoteXCoords.Strings[J + 1];
+                NoteYCoords.Strings[J] := NoteYCoords.Strings[J + 1];
+                NoteSizes.Strings[J] := NoteSizes.Strings[J + 1];
+
+                NoteTexts.Strings[J + 1] := TempText;
+                NoteXCoords.Strings[J + 1] := TempX;
+                NoteYCoords.Strings[J + 1] := TempY;
+                NoteSizes.Strings[J + 1] := TempSize;
+            End;
+        End;
+    End;
+
+    // Create output string list
+    OutputList := TStringList.Create;
+
+    OutputList.Add('PCB Fabrication Notes');
+    OutputList.Add('======================');
+    OutputList.Add('');
+
+    LastY := OriginY;
+
+    // Process each note
+    For I := 0 to NoteTexts.Count - 1 Do
+    Begin
+        CurrentX := StrToFloat(NoteXCoords.Strings[I]);
+        CurrentY := StrToFloat(NoteYCoords.Strings[I]);
+
+        // Calculate blank lines based on Y gap
+        BlankLines := Round((CurrentY - LastY) / LineGap) - 1;
+        If BlankLines < 0 Then BlankLines := 0;
+
+        // Add blank lines for vertical spacing
+        For J := 1 to BlankLines Do
+            OutputList.Add('');
+
+        // Calculate horizontal spacing
+        SpaceCount := Round((CurrentX - OriginX) / CharWidth);
+        If SpaceCount < 0 Then SpaceCount := 0;
+
+        // Create line with appropriate spacing
+        CurrentLine := CreateSpaces(SpaceCount) + NoteTexts.Strings[I];
+        OutputList.Add(CurrentLine);
+
+        LastY := CurrentY;
+    End;
+
+    // Add footer
+    OutputList.Add('');
+    OutputList.Add('======================');
+    OutputList.Add('Total Notes: ' + IntToStr(NoteTexts.Count));
+    OutputList.Add('Exported: ' + DateTimeToStr(Now));
+
+    // Save to file
+    FileName := ChangeFileExt(Board.FileName, '_FabNotes.txt');
+    OutputList.SaveToFile(FileName);
+
+    ShowMessage('Fab notes exported successfully to:' + #13#10 + FileName + #13#10 +
+               'Total notes exported: ' + IntToStr(NoteTexts.Count));
+
+    // Clean up
+    OutputList.Free;
+    NoteTexts.Free;
+    NoteXCoords.Free;
+    NoteYCoords.Free;
+    NoteSizes.Free;
+    NumberedNoteXCoords.Free;
+End;
+{..............................................................................}
