@@ -1,6 +1,7 @@
 ### How to Use
 Below are the steps, but it works by changing the DesignItemID for all `Old Part Number` to `New Part Number` from the list in the csv. Then you update from libraries in schematic and it will update all the library parameters using the new DesignItemID.
 
+Run this script from any Schematic Sheet for your given project.
 1. See the example csv where you can enter an old part number and new part number in csv format (Keep column header names Old Part Number & New Part Number).
 2. Run the script: `File > Run Script... > BatchUpdateFromLibraries.pas > Run`
 3. The script will prompt to select the csv file. You can use `example.csv`
