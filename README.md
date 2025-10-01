@@ -13,6 +13,9 @@
 - `Diff_Polarity_Checker`: Iterates pins on schematic and compares to the net names they are connected to. If it finds a P/N mismatch or similar (PD/DN, etc) it notifies the user
 - `ImportPinPackageLengths`: Import package delays from a csv on to a component
 
+# DBLib
+- BatchUpdateFromLibraries: Change from one part to another, but in batch fashion.
+
 # PCBLib
 - `PCB_Library_Merger`: Merges PCB libraries
 
