@@ -1,12 +1,11 @@
-
-Interface
-Type
-  CopyParamPlacementForm = class(TForm)
-    ButtonBrowse        : TButton;
-    ButtonRun           : TButton;
-    txtBoxRefDes                : TEdit;
-    procedure ButtonBrowseClick(Sender: TObject);
-    End;
+{..............................................................................}
+{ Summary: Copy parameter placement from source component to destination       }
+{          components. Works with unannotated designators (R?, C?, etc.)      }
+{                                                                              }
+{ Usage:   1. Select destination component(s)                                 }
+{          2. Run script                                                      }
+{          3. Click on source component when prompted                         }
+{..............................................................................}
 
 Var
     SrcRot : Integer;
@@ -24,44 +23,7 @@ Begin
     End;
 End;
 
-function GetParameter(Cmp: ISch_Component, SearchParam: String) : String;
-var
-    iterator    :   ISch_Iterator;
-    Parameter : ISch_Parameter;
-    ParamName : String;
-    ParamValue : String;
-    CmpDes : String;
-begin
-    result := '';
-
-    If Cmp = Nil Then Exit;
-
-    Try
-        CmpDes := Cmp.Designator.Text;
-        iterator := Cmp.SchIterator_Create;
-        iterator.SetState_FilterAll;
-        //iterator.SetState_IterationDepth(eIterateAllLevels);
-        iterator.SetState_IterationDepth(eIterateFirstLevel);
-        iterator.AddFilter_ObjectSet(MkSet(eParameter));
-
-        Parameter := iterator.FirstSchObject;
-        While Parameter <> Nil Do
-        Begin
-            ParamName := Parameter.Name;
-            ParamValue := Parameter.Text;
-
-            If LowerCase(ParamName) = LowerCase(SearchParam) Then
-            Begin
-                result := ParamValue;
-                Exit;
-            End;
-            Parameter := iterator.NextSchObject;
-        End;
-    Except
-
-    End;
-end;
-
+{..............................................................................}
 function GetParamOffset(ParamName: String, SrcData: TStringList, var Dx: Integer, var Dy: Integer, var just: TTextJustification, var rot: string):Boolean;
 var
     i: Integer;
@@ -77,13 +39,14 @@ begin
          ParamInfo.DelimitedText := SrcData.Get(i);
 
          DstParamName := ParamInfo.Get(0);
-         Dx := ParamInfo.Get(1);
-         Dy := ParamInfo.Get(2);
-         just := ParamInfo.Get(3);
+         Dx := StrToInt(ParamInfo.Get(1));
+         Dy := StrToInt(ParamInfo.Get(2));
+         just := StrToInt(ParamInfo.Get(3));
          rot := ParamInfo.Get(4);
          If ParamName = DstParamName then
          begin
              result := True;
+             ParamInfo.Free;
              exit;
          end;
 
@@ -91,255 +54,281 @@ begin
     end;
 end;
 
-function SetSelectedPositions(Project: IProject, SrcData: TStringList);
+{..............................................................................}
+function SetPositionsForComponent(Cmp: ISch_Component, SrcData: TStringList): Boolean;
 Var
-    I           : Integer;
-    Doc         : IDocument;
-    CurrentSch  : ISch_Document;
-    Cmp: ISch_Component;
-    CmpIterator, PIterator   : ISch_Iterator;
+    PIterator   : ISch_Iterator;
     CmpDes: ISch_Designator;
-    CmpName, ParamName, ParamText: string;
-    Hidden, Selected, ParamMatch: boolean;
+    ParamName, ParamText: string;
     Parameter: ISch_Parameter;
-    CmpX, CmpY, Px, Py, DesX, DesY, Dx, Dy: Integer;
+    CmpX, CmpY, Dx, Dy: Integer;
     just : TTextJustification;
     rot: string;
 Begin
-    For I := 0 to Project.DM_LogicalDocumentCount - 1 Do
-    Begin
-        Doc := Project.DM_LogicalDocuments(I);
-        If Doc.DM_DocumentKind = 'SCH' Then
+    Result := False;
+
+    If Cmp = Nil Then Exit;
+
+    Try
+        CmpDes := Cmp.Designator;
+
+        If CmpDes = Nil Then Exit;
+
+        // Match component rotation to source rotation
+        Cmp.Orientation := SrcRot;
+
+        CmpX := Cmp.Location.X;
+        CmpY := Cmp.Location.Y;
+
+        // Handle Cmp Designator Position First
+        if GetParamOffset('DESIGNATOR', SrcData, Dx, Dy, just, rot) then
+        begin
+            CmpDes.Orientation := StrToInt(rot);
+            CmpDes.Justification := just;
+            CmpDes.MoveToXY(CmpX + Dx, CmpY + Dy);
+        end;
+
+        // ITERATE PARAMETERS -----------------------------
+        PIterator := Cmp.SchIterator_Create;
+        PIterator.AddFilter_ObjectSet(MkSet(eParameter));
+
+        Parameter := PIterator.FirstSchObject;
+        While Parameter <> Nil Do
         Begin
-            Client.OpenDocument('SCH',Doc.DM_FullPath); // Open Document
-            CurrentSch := SchServer.GetSchDocumentByPath(Doc.DM_FullPath);
+            ParamName := Parameter.Name;
+            ParamText := Parameter.Text;
+            Parameter.IsHidden := True; // Init to Hidden
 
-            SchServer.ProcessControl.PreProcess(CurrentSch, '');
+            if GetParamOffset(ParamName, SrcData, Dx, Dy, just, rot) then
+            begin
+                Parameter.IsHidden := False;
+                Parameter.Orientation := StrToInt(rot);
+                Parameter.Justification := just;
+                Parameter.MoveToXY(CmpX + Dx, CmpY + Dy);
+            end;
 
-            // Look for components only
-            CmpIterator := CurrentSch.SchIterator_Create;
-            CmpIterator.AddFilter_ObjectSet(MkSet(eSchComponent));
-
-            Try
-                Cmp := CmpIterator.FirstSchObject;
-                While Cmp <> Nil Do
-                Begin
-                    //ReportList.Add(AComponent.Designator.Name + ' ' + AComponent.Designator.Text);
-                    CmpDes := Cmp.Designator;
-                    CmpName := Cmp.Designator.Name;
-
-                    Selected := Cmp.Selection;
-                    if (CmpDes <> nil) and (Selected) then
-                    begin
-                        Try
-                            // Match component rotation to source rotation
-                            //Cmp.SetState_OrientationWithoutRotating(SrcRot);
-                            Cmp.Orientation := SrcRot;
-
-                            CmpX := Cmp.Location.X;
-                            CmpY := Cmp.Location.Y;
-
-                            DesX := CmpDes.Location.X;
-                            DesY := CmpDes.Location.Y;
-
-                            // Handle Cmp Designator Position First
-                            if GetParamOffset('DESIGNATOR', SrcData, Dx, Dy, just, rot) then
-                            begin
-                                CmpDes.Orientation := StrToInt(rot);
-                                CmpDes.Justification := StrToInt(just);
-                                CmpDes.MoveToXY(CmpX + StrToInt(Dx), CmpY + StrToInt(Dy));
-                            end;
-
-                            // ITERATE PARAMETERS -----------------------------
-                            PIterator := Cmp.SchIterator_Create;
-                            PIterator.AddFilter_ObjectSet(MkSet(eParameter));
-
-                            Parameter := PIterator.FirstSchObject;
-                            While Parameter <> Nil Do
-                            Begin
-                                ParamName := Parameter.Name;
-                                ParamText := Parameter.Text;
-                                Parameter.IsHidden := True; // Init to Hidden
-
-                                if GetParamOffset(ParamName, SrcData, Dx, Dy, just, rot) then
-                                begin
-                                    Parameter.IsHidden := False;
-                                    Parameter.Orientation := StrToInt(rot);
-                                    Parameter.Justification := StrToInt(just);
-                                    Parameter.MoveToXY(CmpX + StrToInt(Dx), CmpY + StrToInt(Dy));
-                                end;
-
-                                Parameter := PIterator.NextSchObject;
-                            End;
-                        Finally
-                            Cmp.SchIterator_Destroy(PIterator);
-                        End;
-                    end;
-
-                    Cmp := CmpIterator.NextSchObject;
-                End;
-            Finally
-                CurrentSch.SchIterator_Destroy(CmpIterator);
-            End;
-
-            SchServer.ProcessControl.PostProcess(CurrentSch, '');
-            CurrentSch.GraphicallyInvalidate;
+            Parameter := PIterator.NextSchObject;
         End;
+
+        Cmp.SchIterator_Destroy(PIterator);
+        Result := True;
+    Except
+        ShowMessage('Error setting parameter positions');
     End;
 End;
 
-function GetSrcPositions(Project: IProject, SrcDes: String): TStringList;
+{..............................................................................}
+function GetSrcPositionsFromComponent(Cmp: ISch_Component): TStringList;
 Var
-    I           : Integer;
-    Doc         : IDocument;
-    CurrentSch  : ISch_Document;
     SrcData        : TStringList;
-    Cmp: ISch_Component;
-    CmpIterator, PIterator   : ISch_Iterator;
+    PIterator      : ISch_Iterator;
     CmpDes: ISch_Designator;
-    CmpName, ParamName, ParamText: string;
-    Hidden: boolean;
+    ParamName, ParamText: string;
     Parameter: ISch_Parameter;
     CmpX, CmpY, Px, Py, Dx, Dy: Integer;
 Begin
     SrcData := TStringList.Create;
+    Result := SrcData;
 
-    For I := 0 to Project.DM_LogicalDocumentCount - 1 Do
-    Begin
-        Doc := Project.DM_LogicalDocuments(I);
-        If Doc.DM_DocumentKind = 'SCH' Then
+    If Cmp = Nil Then Exit;
+
+    Try
+        CmpDes := Cmp.Designator;
+        If CmpDes = Nil Then Exit;
+
+        SrcRot := Cmp.Orientation;
+
+        CmpX := Cmp.Location.X;
+        CmpY := Cmp.Location.Y;
+
+        Dx := CmpDes.Location.X;
+        Dy := CmpDes.Location.Y;
+
+        SrcData.Add('DESIGNATOR'+';'+IntToStr(Dx-CmpX)+';'+IntToStr(Dy-CmpY)+';'+IntToStr(CmpDes.Justification)+';'+IntToStr(CmpDes.Orientation));
+
+        PIterator := Cmp.SchIterator_Create;
+        PIterator.AddFilter_ObjectSet(MkSet(eParameter));
+
+        Parameter := PIterator.FirstSchObject;
+        While Parameter <> Nil Do
         Begin
-            Client.OpenDocument('SCH',Doc.DM_FullPath); // Open Document
-            CurrentSch := SchServer.GetSchDocumentByPath(Doc.DM_FullPath);
+            if Parameter.IsHidden = False then
+            begin
+                ParamName := Parameter.Name;
+                ParamText := Parameter.Text;
+                Px := Parameter.Location.X;
+                Py := Parameter.Location.Y;
 
-            // Look for components only
-            CmpIterator := CurrentSch.SchIterator_Create;
-            CmpIterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+                SrcData.Add(ParamName+';'+IntToStr(Px-CmpX)+';'+IntToStr(Py-CmpY)+';'+IntToStr(Parameter.Justification)+';'+IntToStr(Parameter.Orientation));
+            end;
 
-            Try
-                Cmp := CmpIterator.FirstSchObject;
-                While Cmp <> Nil Do
+            Parameter := PIterator.NextSchObject;
+        End;
+
+        Cmp.SchIterator_Destroy(PIterator);
+    Except
+        ShowMessage('Error reading source component parameters');
+    End;
+End;
+
+{..............................................................................}
+function GetComponentAtLocation(CurrentSch: ISch_Document; X: Integer; Y: Integer): ISch_Component;
+Var
+    SpatialIterator : ISch_Iterator;
+    GraphicalObj    : ISch_GraphicalObject;
+    SearchRadius    : Integer;
+Begin
+    Result := Nil;
+
+    If CurrentSch = Nil Then Exit;
+
+    // Define search radius (in internal units - adjust as needed)
+    // Typical schematic grid is 10 mils = 100000 internal units
+    SearchRadius := 50000; // About 5 mils
+
+    // Create a spatial iterator around the clicked point
+    SpatialIterator := CurrentSch.SchIterator_Create;
+    If SpatialIterator = Nil Then Exit;
+
+    Try
+        SpatialIterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+        SpatialIterator.AddFilter_Area(X - SearchRadius, Y - SearchRadius,
+                                       X + SearchRadius, Y + SearchRadius);
+
+        GraphicalObj := SpatialIterator.FirstSchObject;
+        While GraphicalObj <> Nil Do
+        Begin
+            If GraphicalObj.ObjectId = eSchComponent Then
+            Begin
+                Result := GraphicalObj;
+                Exit; // Return first component found
+            End;
+            GraphicalObj := SpatialIterator.NextSchObject;
+        End;
+
+    Finally
+        CurrentSch.SchIterator_Destroy(SpatialIterator);
+    End;
+End;
+
+{..............................................................................}
+Procedure Run;
+Var
+    CurrentSch          : ISch_Document;
+    DestinationList     : TList;
+    Iterator            : ISch_Iterator;
+    DestinationCmp      : ISch_Component;
+    SourceCmp           : ISch_Component;
+    AComponent          : ISch_Component;
+    SrcData             : TStringList;
+    DestDesignator      : String;
+    SrcDesignator       : String;
+    ClickLocation       : TLocation;
+    i                   : Integer;
+    AppliedCount        : Integer;
+Begin
+    If SchServer = Nil Then Exit;
+
+    CurrentSch := SchServer.GetCurrentSchDocument;
+    If CurrentSch = Nil Then Exit;
+
+    DestinationList := TList.Create;
+    Try
+        // Step 1: Get currently selected destination component(s)
+        Iterator := CurrentSch.SchIterator_Create;
+        Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+
+        Try
+            AComponent := Iterator.FirstSchObject;
+            While AComponent <> Nil Do
+            Begin
+                If AComponent.Selection Then
                 Begin
-                    //ReportList.Add(AComponent.Designator.Name + ' ' + AComponent.Designator.Text);
-                    CmpDes := Cmp.Designator;
-                    if (CmpDes <> nil) and (Cmp.Designator.Text = SrcDes) then
-                    begin
-                        Try
-                            SrcRot := Cmp.Orientation;
-
-                            CmpX := Cmp.Location.X;
-                            CmpY := Cmp.Location.Y;
-
-                            Dx := CmpDes.Location.X;
-                            Dy := CmpDes.Location.Y;
-
-                            SrcData.Add('DESIGNATOR'+';'+IntToStr(Dx-CmpX)+';'+IntToStr(Dy-CmpY)+';'+IntToStr(CmpDes.Justification)+';'+IntToStr(CmpDes.Orientation));
-
-                            PIterator := Cmp.SchIterator_Create;
-                            PIterator.AddFilter_ObjectSet(MkSet(eParameter));
-
-                            Parameter := PIterator.FirstSchObject;
-                            While Parameter <> Nil Do
-                            Begin
-                                if Parameter.IsHidden = False then
-                                begin
-                                    ParamName := Parameter.Name;
-                                    ParamText := Parameter.Text;
-                                    Px := Parameter.Location.X;
-                                    Py := Parameter.Location.Y;
-
-                                    SrcData.Add(ParamName+';'+IntToStr(Px-CmpX)+';'+IntToStr(Py-CmpY)+';'+IntToStr(Parameter.Justification)+';'+IntToStr(CmpDes.Orientation));
-                                end;
-
-                                Parameter := PIterator.NextSchObject;
-                            End;
-                        Finally
-                            Cmp.SchIterator_Destroy(PIterator);
-                        End;
-
-                        result := SrcData;
-                        exit;
-                    end;
-
-                    Cmp := CmpIterator.NextSchObject;
+                    DestinationList.Add(AComponent);
                 End;
-            Finally
-                CurrentSch.SchIterator_Destroy(CmpIterator);
+
+                AComponent := Iterator.NextSchObject;
+            End;
+        Finally
+            CurrentSch.SchIterator_Destroy(Iterator);
+        End;
+
+        If DestinationList.Count = 0 Then
+        Begin
+            ShowMessage('Please select destination component(s) first, then run the script');
+            Exit;
+        End;
+
+        // Build designator list
+        DestDesignator := '';
+        For i := 0 to DestinationList.Count - 1 Do
+        Begin
+            DestinationCmp := DestinationList.Items[i];
+            If DestinationCmp.Designator <> Nil Then
+            Begin
+                If i > 0 Then DestDesignator := DestDesignator + ', ';
+                DestDesignator := DestDesignator + DestinationCmp.Designator.Text;
             End;
         End;
+
+        // Step 2: Prompt user to click on SOURCE component
+        ClickLocation := TLocation;
+        ClickLocation.X := 0;
+        ClickLocation.Y := 0;
+
+        If Not CurrentSch.ChooseLocationInteractively(ClickLocation,
+                                                       'Click on SOURCE component to copy parameter placement from') Then
+        Begin
+            Exit;
+        End;
+
+        // Find component at clicked location
+        SourceCmp := GetComponentAtLocation(CurrentSch, ClickLocation.X, ClickLocation.Y);
+
+        If SourceCmp = Nil Then
+        Begin
+            ShowMessage('No component found at clicked location. Please try again.');
+            Exit;
+        End;
+
+        // Step 3: Get parameter positions from source component
+        If SourceCmp.Designator <> Nil Then
+            SrcDesignator := SourceCmp.Designator.Text
+        Else
+            SrcDesignator := 'Unknown';
+
+        SrcData := GetSrcPositionsFromComponent(SourceCmp);
+
+        If SrcData.Count = 0 Then
+        Begin
+            ShowMessage('No parameter data found on source component: ' + SrcDesignator);
+            SrcData.Free;
+            Exit;
+        End;
+
+        // Step 4: Apply to all destination components
+        SchServer.ProcessControl.PreProcess(CurrentSch, '');
+
+        AppliedCount := 0;
+        For i := 0 to DestinationList.Count - 1 Do
+        Begin
+            DestinationCmp := DestinationList.Items[i];
+            If SetPositionsForComponent(DestinationCmp, SrcData) Then
+                AppliedCount := AppliedCount + 1;
+        End;
+
+        SchServer.ProcessControl.PostProcess(CurrentSch, '');
+        CurrentSch.GraphicallyInvalidate;
+
+        ShowMessage('Parameter placement copied successfully!' + #13#10 +
+                   'Source: ' + SrcDesignator + #13#10 +
+                   'Applied to ' + IntToStr(AppliedCount) + ' component(s): ' + DestDesignator);
+
+        // Cleanup
+        SrcData.Free;
+
+    Finally
+        DestinationList.Free;
     End;
-
-    SrcData.Free;
 End;
-
-function NoGUI();
-Const
-    D = ',';
-Var
-    I           : Integer;
-    Project     : IProject;
-    Doc         : IDocument;
-    CurrentSch  : ISch_Document;
-    ReportDocument : IServerDocument;
-    FileName       : TPCBString;
-    Document       : IServerDocument;
-    SrcData        : TStringList;
-    Cmp            : IPCB_Component;
-    xorigin, yorigin : Integer;
-    Layer, x,y,L,R,T,B, RefDes, Rot, Nets, CmpData: String;
-    Rect: TCoordRect;
-Begin
-    Project := GetWorkspace.DM_FocusedProject;
-    If Project = Nil Then Exit;
-
-    SrcData := GetSrcPositions(Project, 'R180');
-
-    SetSelectedPositions(Project, SrcData);
-End;
-
-{..............................................................................}
-function Run(CmpSrc: String);
-Const
-    D = ',';
-Var
-    I           : Integer;
-    Project     : IProject;
-    Doc         : IDocument;
-    CurrentSch  : ISch_Document;
-    ReportDocument : IServerDocument;
-    FileName       : TPCBString;
-    Document       : IServerDocument;
-    SrcData        : TStringList;
-    Cmp            : IPCB_Component;
-    xorigin, yorigin : Integer;
-    Layer, x,y,L,R,T,B, RefDes, Rot, Nets, CmpData: String;
-    Rect: TCoordRect;
-Begin
-    Project := GetWorkspace.DM_FocusedProject;
-    If Project = Nil Then Exit;
-
-    SrcData := GetSrcPositions(Project, CmpSrc);
-
-    SetSelectedPositions(Project, SrcData);
-End;
-{..............................................................................}
-
-{..............................................................................}
-
-
-{..............................................................................}
-Procedure TCopyParamPlacementForm.ButtonRunClick(Sender: TObject);
-Begin
-    Run(Trim(txtBoxRefDes.Text));
-End;
-{..............................................................................}
-
-{..............................................................................}
-Procedure RunGUI;
-Begin
-    if CopyParamPlacementForm = nil then exit;
-    CopyParamPlacementForm.ShowModal;
-End;
-{..............................................................................}
-
 {..............................................................................}
