@@ -12,6 +12,8 @@
 # Schematic
 - `Diff_Polarity_Checker`: Iterates pins on schematic and compares to the net names they are connected to. If it finds a P/N mismatch or similar (PD/DN, etc) it notifies the user
 - `ImportPinPackageLengths`: Import package delays from a csv on to a component
+- `CopySymbolParameterPlacement`: Tries to copy parameter positions from one symbol to another
+- `Testpoint_Generator`: Adds schematic tracks, nets, and user selected surface mount pad for every net on the design.
 
 # DBLib
 - BatchUpdateFromLibraries: Change from one part to another, but in batch fashion.
@@ -26,7 +28,7 @@
 - `OutJob_RunAll`: Run all output job containers by reading all output job parameters from the .OutJob file (This is just an ini file)
 
 # Half-Baked
-- `CopySymbolParameterPlacement`: Tries to copy parameter positions from one symbol to another
+
 - `DbLib`: Started trying to figure out how to read components from a DbLib, got some information, but not components
 - `LayoutDuplicator`: This is integrated in to `altium-mcp` and does a better job there because AI can match the components. To do this programmatically is not as easy as it sounds.
 - `TombstoneFinder`: Notifies user of potential tombstones using tracks, but does not use polygons
