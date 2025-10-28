@@ -320,10 +320,6 @@ Begin
         SchServer.ProcessControl.PostProcess(CurrentSch, '');
         CurrentSch.GraphicallyInvalidate;
 
-        ShowMessage('Parameter placement copied successfully!' + #13#10 +
-                   'Source: ' + SrcDesignator + #13#10 +
-                   'Applied to ' + IntToStr(AppliedCount) + ' component(s): ' + DestDesignator);
-
         // Cleanup
         SrcData.Free;
 
