@@ -33,10 +33,10 @@ object FormResults: TFormResults
   object LabelSortHint: TLabel
     Left = 120
     Top = 495
-    Width = 200
+    Width = 350
     Height = 13
     Anchors = [akLeft, akBottom]
-    Caption = '(Click column header to sort)'
+    Caption = '(Click header to sort, double-click cell to navigate to component)'
     Font.Color = clGray
     Font.Style = []
     ParentFont = False
@@ -80,6 +80,8 @@ object FormResults: TFormResults
     RowCount = 2
     Options = [goFixedVertLine, goFixedHorzLine, goVertLine, goHorzLine, goColSizing, goRowSelect]
     TabOrder = 3
+    OnDblClick = StringGridResultsDblClick
+    OnMouseDown = StringGridResultsMouseDown
     OnMouseUp = StringGridResultsMouseUp
   end
   object ButtonExport: TButton

@@ -23,15 +23,26 @@ Type
     ButtonClose           : TButton;
     SaveDialog            : TSaveDialog;
     procedure ButtonExportClick(Sender: TObject);
+    procedure StringGridResultsMouseDown(Sender: TObject; Button: TMouseButton;
+      Shift: TShiftState; X, Y: Integer);
     procedure StringGridResultsMouseUp(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
     procedure EditFilterChange(Sender: TObject);
     procedure ButtonClearFilterClick(Sender: TObject);
     procedure ComboBoxFilterColumnChange(Sender: TObject);
+    procedure StringGridResultsDblClick(Sender: TObject);
   End;
+
+Const
+  mrNavigate = 100;  // Custom modal result for navigation request
 
 Var
   FormResults : TFormResults;
+
+  // Navigation request info (set on double-click)
+  NavigateParamName  : String;
+  NavigateParamValue : String;
+  NavigateRow        : Integer;
 
   // Sort state variables
   CurrentSortColumn  : Integer;
@@ -44,6 +55,14 @@ Var
   AllDataRowCount    : Integer;
   AllDataColCount    : Integer;
   FilteredRowCount   : Integer;
+
+  // Resize detection state
+  IsResizing         : Boolean;
+  MouseDownX         : Integer;
+
+  // Track clicked cell for double-click
+  LastClickedCol     : Integer;
+  LastClickedRow     : Integer;
 
 Implementation
 
@@ -211,6 +230,15 @@ Var
     FilterUpper   : String;
     MatchFound    : Boolean;
 Begin
+    // Auto-store data if not yet stored or grid has been repopulated
+    // (detected when grid has more data rows than we have stored)
+    If (AllDataRowCount = 0) Or ((Grid.RowCount - 1) > AllDataRowCount) Then
+    Begin
+        // Sort by first column BEFORE storing (so stored data is sorted)
+        SortGridByColumn(Grid, 0);
+        StoreAllData(Grid);
+    End;
+
     FilterUpper := UpperCase(FilterText);
     GridRow := 1;  // Start after header
 
@@ -298,7 +326,64 @@ Begin
 End;
 
 {..............................................................................}
-{ Mouse up event handler for grid - detect header clicks                       }
+{ Check if X coordinate is near a column border (resize zone)                  }
+{..............................................................................}
+Function IsNearColumnBorder(Grid : TStringGrid; X : Integer) : Boolean;
+Const
+    ResizeZone = 5;  // Pixels from column edge to consider as resize zone
+Var
+    ColLeft   : Integer;
+    ColRight  : Integer;
+    I         : Integer;
+Begin
+    Result := False;
+    ColLeft := 0;
+
+    For I := 0 To Grid.ColCount - 1 Do
+    Begin
+        ColRight := ColLeft + Grid.ColWidths[I];
+
+        // Check if X is near the right edge of this column
+        If (X >= ColRight - ResizeZone) And (X <= ColRight + ResizeZone) Then
+        Begin
+            Result := True;
+            Exit;
+        End;
+
+        ColLeft := ColRight + 1;  // +1 for grid line
+    End;
+End;
+
+{..............................................................................}
+{ Mouse down event handler for grid - detect resize operations                 }
+{..............................................................................}
+Procedure TFormResults.StringGridResultsMouseDown(Sender: TObject; Button: TMouseButton;
+  Shift: TShiftState; X, Y: Integer);
+Var
+    Col, Row : Integer;
+Begin
+    // Only check for left mouse button
+    If Button <> mbLeft Then Exit;
+
+    // Store mouse position for movement detection
+    MouseDownX := X;
+
+    // Get the cell at the click position
+    StringGridResults.MouseToCell(X, Y, Col, Row);
+
+    // Store clicked cell for double-click handler
+    LastClickedCol := Col;
+    LastClickedRow := Row;
+
+    // Check if click was on header row and near a column border
+    If Row = 0 Then
+        IsResizing := IsNearColumnBorder(StringGridResults, X)
+    Else
+        IsResizing := False;
+End;
+
+{..............................................................................}
+{ Mouse up event handler for grid - detect header clicks for sorting           }
 {..............................................................................}
 Procedure TFormResults.StringGridResultsMouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
@@ -308,12 +393,21 @@ Begin
     // Only respond to left mouse button clicks
     If Button <> mbLeft Then Exit;
 
+    // Skip sorting if this was a resize operation or mouse moved significantly
+    If IsResizing Or (Abs(X - MouseDownX) > 3) Then
+    Begin
+        IsResizing := False;
+        Exit;
+    End;
+
     // Get the cell at the click position
     StringGridResults.MouseToCell(X, Y, Col, Row);
 
-    // Check if click was on header row (row 0)
-    If (Row = 0) And (Col >= 0) Then
+    // Check if click was on header row (row 0) and not near a column border
+    If (Row = 0) And (Col >= 0) And (Not IsNearColumnBorder(StringGridResults, X)) Then
         SortGridByColumn(StringGridResults, Col);
+
+    IsResizing := False;
 End;
 
 {..............................................................................}
@@ -346,6 +440,33 @@ Begin
     EditFilter.Text := '';
     ComboBoxFilterColumn.ItemIndex := 0;
     ApplyFilter(StringGridResults, -1, '');
+End;
+
+{..............................................................................}
+{ Double-click event handler for grid - navigate to component                  }
+{..............................................................................}
+Procedure TFormResults.StringGridResultsDblClick(Sender: TObject);
+Var
+    HeaderName  : String;
+Begin
+    // Use cell position stored from MouseDown event
+    // Ignore clicks on header row or invalid positions
+    If (LastClickedRow <= 0) Or (LastClickedCol < 0) Then Exit;
+
+    // Get the parameter name from header (remove sort indicators)
+    HeaderName := StringGridResults.Cells[LastClickedCol, 0];
+    If Pos(' [A-Z]', HeaderName) > 0 Then
+        HeaderName := Copy(HeaderName, 1, Pos(' [A-Z]', HeaderName) - 1);
+    If Pos(' [Z-A]', HeaderName) > 0 Then
+        HeaderName := Copy(HeaderName, 1, Pos(' [Z-A]', HeaderName) - 1);
+
+    // Store navigation info
+    NavigateParamName := HeaderName;
+    NavigateParamValue := StringGridResults.Cells[LastClickedCol, LastClickedRow];
+    NavigateRow := LastClickedRow;
+
+    // Close form with navigation result
+    ModalResult := mrNavigate;
 End;
 
 {..............................................................................}

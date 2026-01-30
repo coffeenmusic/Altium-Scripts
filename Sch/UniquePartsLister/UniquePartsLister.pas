@@ -420,6 +420,93 @@ Begin
 End;
 
 {..............................................................................}
+{ Navigate to a component in the schematic that matches the parameter value    }
+{..............................................................................}
+Procedure NavigateToComponent(ParamName : String; ParamValue : String);
+Var
+    Project      : IProject;
+    DocIndex     : Integer;
+    SchDoc       : ISch_Document;
+    Iterator     : ISch_Iterator;
+    AComponent   : ISch_Component;
+    CompValue    : String;
+    Found        : Boolean;
+    DocPath      : String;
+Begin
+    If ParamValue = '' Then Exit;
+
+    Project := GetWorkspace.DM_FocusedProject;
+    If Project = Nil Then Exit;
+
+    Found := False;
+
+    // Iterate through all schematic documents
+    For DocIndex := 0 To Project.DM_LogicalDocumentCount - 1 Do
+    Begin
+        If Found Then Break;
+
+        If Project.DM_LogicalDocuments(DocIndex).DM_DocumentKind = 'SCH' Then
+        Begin
+            DocPath := Project.DM_LogicalDocuments(DocIndex).DM_FullPath;
+            SchDoc := SchServer.GetSchDocumentByPath(DocPath);
+
+            If SchDoc = Nil Then
+            Begin
+                // Document not open, try to open it
+                Client.OpenDocument('SCH', DocPath);
+                SchDoc := SchServer.GetSchDocumentByPath(DocPath);
+            End;
+
+            If SchDoc <> Nil Then
+            Begin
+                Iterator := SchDoc.SchIterator_Create;
+                Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+
+                Try
+                    AComponent := Iterator.FirstSchObject;
+                    While AComponent <> Nil Do
+                    Begin
+                        // Get the parameter value for this component
+                        CompValue := GetParameterValue(AComponent, ParamName);
+
+                        If CompValue = ParamValue Then
+                        Begin
+                            // Found the component - navigate to it
+                            Found := True;
+
+                            // Make this document the active document
+                            Client.ShowDocument(Client.OpenDocument('SCH', DocPath));
+
+                            // Deselect all first
+                            ResetParameters;
+                            RunProcess('Sch:DeSelect');
+
+                            // Select this component
+                            AComponent.SetState_Selection(True);
+
+                            // Refresh and zoom to selected component
+                            SchDoc.GraphicallyInvalidate;
+
+                            ResetParameters;
+                            RunProcess('Sch:ZoomSelected');
+
+                            Break;
+                        End;
+
+                        AComponent := Iterator.NextSchObject;
+                    End;
+                Finally
+                    SchDoc.SchIterator_Destroy(Iterator);
+                End;
+            End;
+        End;
+    End;
+
+    If Not Found Then
+        ShowMessage('Component with ' + ParamName + ' = "' + ParamValue + '" not found.');
+End;
+
+{..............................................................................}
 { Populate the results form with unique parts data                             }
 {..............................................................................}
 Procedure PopulateResultsForm(UniqueIDParam : String; ColumnParams : TStringList);
@@ -476,11 +563,13 @@ Begin
         FormResults.ComboBoxFilterColumn.Items.Add(ColumnParams.Strings[I]);
     FormResults.ComboBoxFilterColumn.ItemIndex := 0;
 
-    // Clear filter text
-    FormResults.EditFilter.Text := '';
+    // Reset filter state to force re-initialization
+    AllDataRowCount := 0;
 
-    // Store data for filtering
-    StoreAllData(FormResults.StringGridResults);
+    // Force filter to run by setting non-empty then empty
+    // (ensures OnChange fires even if text was already empty)
+    FormResults.EditFilter.Text := ' ';
+    FormResults.EditFilter.Text := '';
 
     FormResults.LabelCount.Caption := 'Unique parts: ' + IntToStr(UniquePartsData.Count);
 End;
@@ -563,7 +652,13 @@ Begin
 
         // Step 4: Show results dialog
         PopulateResultsForm(UniqueIDParam, ColumnParams);
-        FormResults.ShowModal;
+
+        // Show form and handle result
+        If FormResults.ShowModal = mrNavigate Then
+        Begin
+            // User double-clicked to navigate - find and zoom to component
+            NavigateToComponent(NavigateParamName, NavigateParamValue);
+        End;
 
     Finally
         AllParameterNames.Free;
