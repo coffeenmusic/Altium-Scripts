@@ -6,6 +6,11 @@
 { select which parameter to use as a unique identifier, and displays           }
 { a table of unique parts with selected additional columns.                    }
 {                                                                              }
+{ Entry Points:                                                                }
+{   RunGUI    - Uses saved INI settings (fast launch)                          }
+{   RunConfig - Always shows parameter selection dialog                        }
+{                                                                              }
+{ Version 1.2 - Separated configuration from main run for faster launches      }
 { Version 1.1 - Added INI file to remember parameter selections                }
 { Created with assistance from Claude AI                                       }
 {..............................................................................}
@@ -248,8 +253,9 @@ End;
 
 {..............................................................................}
 { Collect all parameters from all schematic sheets in the project              }
+{ (Dummy parameter hides from user menu)                                       }
 {..............................................................................}
-Procedure CollectAllParameters;
+Procedure CollectAllParameters(Dummy : Integer);
 Var
     I           : Integer;
     Project     : IProject;
@@ -367,8 +373,9 @@ End;
 
 {..............................................................................}
 { Populate the parameter selection form                                        }
+{ (Dummy parameter hides from user menu)                                       }
 {..............................................................................}
-Procedure PopulateParamSelectForm;
+Procedure PopulateParamSelectForm(Dummy : Integer);
 Var
     I              : Integer;
     SavedUniqueID  : String;
@@ -575,9 +582,37 @@ Begin
 End;
 
 {..............................................................................}
-{ Main entry point - Run the Unique Parts Lister                               }
+{ Show results for given parameters - shared by both entry points              }
 {..............................................................................}
-Procedure RunUniquePartsLister;
+Procedure ShowResultsForParams(UniqueIDParam : String; ColumnParams : TStringList);
+Begin
+    // Build unique parts list
+    BeginHourGlass;
+    BuildUniquePartsList(UniqueIDParam, ColumnParams);
+    EndHourGlass;
+
+    If UniquePartsData.Count = 0 Then
+    Begin
+        ShowMessage('No unique parts found with the selected parameter.');
+        Exit;
+    End;
+
+    // Show results dialog
+    PopulateResultsForm(UniqueIDParam, ColumnParams);
+
+    // Show form and handle result
+    If FormResults.ShowModal = mrNavigate Then
+    Begin
+        // User double-clicked to navigate - find and zoom to component
+        NavigateToComponent(NavigateParamName, NavigateParamValue);
+    End;
+End;
+
+{..............................................................................}
+{ RunConfig - Always shows parameter selection dialog                          }
+{ Use this entry point to change which parameters are displayed                }
+{..............................................................................}
+Procedure RunConfig;
 Var
     I               : Integer;
     UniqueIDParam   : String;
@@ -599,9 +634,9 @@ Begin
     ColumnParams := TStringList.Create;
 
     Try
-        // Step 1: Collect all parameter names from the project
+        // Collect all parameter names from the project
         BeginHourGlass;
-        CollectAllParameters;
+        CollectAllParameters(0);
         EndHourGlass;
 
         If AllParameterNames.Count = 0 Then
@@ -611,8 +646,8 @@ Begin
             Exit;
         End;
 
-        // Step 2: Show parameter selection dialog
-        PopulateParamSelectForm;
+        // Show parameter selection dialog
+        PopulateParamSelectForm(0);
 
         If FormParamSelect.ShowModal <> mrOK Then
             Exit;
@@ -639,30 +674,62 @@ Begin
         // Save settings to INI file for next time
         SaveSettingsToINI(UniqueIDParam, ColumnParams);
 
-        // Step 3: Build unique parts list
-        BeginHourGlass;
-        BuildUniquePartsList(UniqueIDParam, ColumnParams);
-        EndHourGlass;
-
-        If UniquePartsData.Count = 0 Then
-        Begin
-            ShowMessage('No unique parts found with the selected parameter.');
-            Exit;
-        End;
-
-        // Step 4: Show results dialog
-        PopulateResultsForm(UniqueIDParam, ColumnParams);
-
-        // Show form and handle result
-        If FormResults.ShowModal = mrNavigate Then
-        Begin
-            // User double-clicked to navigate - find and zoom to component
-            NavigateToComponent(NavigateParamName, NavigateParamValue);
-        End;
+        // Show results
+        ShowResultsForParams(UniqueIDParam, ColumnParams);
 
     Finally
         AllParameterNames.Free;
         UniquePartsData.Free;
+        ColumnParams.Free;
+    End;
+End;
+
+{..............................................................................}
+{ RunGUI - Main entry point using saved INI settings                           }
+{ If no settings saved, automatically runs RunConfig                           }
+{..............................................................................}
+Procedure RunGUI;
+Var
+    UniqueIDParam   : String;
+    ColumnParams    : TStringList;
+Begin
+    // Check if schematic server exists
+    If SchServer = Nil Then
+    Begin
+        ShowMessage('Schematic Server not available.');
+        Exit;
+    End;
+
+    // Initialize settings file path
+    SettingsFilePath := GetSettingsFilePath;
+
+    // Try to load saved settings from INI
+    ColumnParams := TStringList.Create;
+    Try
+        LoadSettingsFromINI(UniqueIDParam, ColumnParams);
+
+        // If no saved settings, run the configuration dialog instead
+        If UniqueIDParam = '' Then
+        Begin
+            ColumnParams.Free;
+            ColumnParams := Nil;  // Prevent double-free in Finally block
+            RunConfig;
+            Exit;
+        End;
+
+        // Initialize lists for results
+        AllParameterNames := TStringList.Create;
+        UniquePartsData := TStringList.Create;
+
+        Try
+            // Show results using saved parameters
+            ShowResultsForParams(UniqueIDParam, ColumnParams);
+        Finally
+            AllParameterNames.Free;
+            UniquePartsData.Free;
+        End;
+
+    Finally
         ColumnParams.Free;
     End;
 End;

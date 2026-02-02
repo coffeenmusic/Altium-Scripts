@@ -499,7 +499,8 @@ Begin
                         If Pos(' [Z-A]', CellValue) > 0 Then
                             CellValue := Copy(CellValue, 1, Pos(' [Z-A]', CellValue) - 1);
                     End;
-                    CellValue := StringReplace(CellValue, '"', '""', [rfReplaceAll]);
+                    // Escape double quotes for CSV (without brackets for DelphiScript)
+                    CellValue := StringReplace(CellValue, '"', '""', rfReplaceAll);
                     Line := Line + '"' + CellValue + '"';
                 End;
                 CSVFile.Add(Line);
