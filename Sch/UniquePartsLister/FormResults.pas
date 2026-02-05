@@ -22,12 +22,14 @@ Type
     ButtonExport          : TButton;
     ButtonClose           : TButton;
     SaveDialog            : TSaveDialog;
+    FilterTimer           : TTimer;
     procedure ButtonExportClick(Sender: TObject);
     procedure StringGridResultsMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
     procedure StringGridResultsMouseUp(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
     procedure EditFilterChange(Sender: TObject);
+    procedure FilterTimerTimer(Sender: TObject);
     procedure ButtonClearFilterClick(Sender: TObject);
     procedure ComboBoxFilterColumnChange(Sender: TObject);
     procedure StringGridResultsDblClick(Sender: TObject);
@@ -52,6 +54,7 @@ Var
 
   // Filter state - store all data rows
   AllDataRows        : Array[0..5000, 0..50] Of String;
+  AllDataRowsUpper   : Array[0..5000, 0..50] Of String;  // Uppercase for faster filtering
   AllDataRowCount    : Integer;
   AllDataColCount    : Integer;
   FilteredRowCount   : Integer;
@@ -200,12 +203,13 @@ End;
 {..............................................................................}
 Procedure StoreAllData(Grid : TStringGrid);
 Var
-    I, J : Integer;
+    I, J      : Integer;
+    CellValue : String;
 Begin
     AllDataColCount := Grid.ColCount;
     AllDataRowCount := Grid.RowCount - 1;  // Exclude header row
 
-    // Store all data rows (starting from row 1, skipping header)
+    // Store all data rows and pre-compute uppercase for faster filtering
     For I := 1 To Grid.RowCount - 1 Do
     Begin
         If I <= 5000 Then
@@ -213,7 +217,11 @@ Begin
             For J := 0 To Grid.ColCount - 1 Do
             Begin
                 If J <= 50 Then
-                    AllDataRows[I - 1, J] := Grid.Cells[J, I];
+                Begin
+                    CellValue := Grid.Cells[J, I];
+                    AllDataRows[I - 1, J] := CellValue;
+                    AllDataRowsUpper[I - 1, J] := UpperCase(CellValue);  // Pre-compute uppercase
+                End;
             End;
         End;
     End;
@@ -258,6 +266,9 @@ Begin
     End
     Else
     Begin
+        // Pre-allocate maximum possible rows (optimization: avoids repeated resizing)
+        Grid.RowCount := AllDataRowCount + 1;
+
         // Apply filter
         For I := 0 To AllDataRowCount - 1 Do
         Begin
@@ -265,13 +276,12 @@ Begin
 
             If FilterCol < 0 Then
             Begin
-                // Search all columns
+                // Search all columns (use pre-computed uppercase)
                 For J := 0 To AllDataColCount - 1 Do
                 Begin
                     If J <= 50 Then
                     Begin
-                        CellValue := UpperCase(AllDataRows[I, J]);
-                        If Pos(FilterUpper, CellValue) > 0 Then
+                        If Pos(FilterUpper, AllDataRowsUpper[I, J]) > 0 Then
                         Begin
                             MatchFound := True;
                             Break;
@@ -281,22 +291,17 @@ Begin
             End
             Else
             Begin
-                // Search specific column
+                // Search specific column (use pre-computed uppercase)
                 If FilterCol <= 50 Then
                 Begin
-                    CellValue := UpperCase(AllDataRows[I, FilterCol]);
-                    If Pos(FilterUpper, CellValue) > 0 Then
+                    If Pos(FilterUpper, AllDataRowsUpper[I, FilterCol]) > 0 Then
                         MatchFound := True;
                 End;
             End;
 
             If MatchFound Then
             Begin
-                // Ensure grid has enough rows
-                If GridRow >= Grid.RowCount Then
-                    Grid.RowCount := GridRow + 1;
-
-                // Copy matching row to grid
+                // Copy matching row to grid (no resize needed, already allocated)
                 For J := 0 To AllDataColCount - 1 Do
                 Begin
                     If J <= 50 Then
@@ -306,7 +311,7 @@ Begin
             End;
         End;
 
-        // Set final row count (at least 2 to keep header visible)
+        // Trim to actual row count (at least 2 to keep header visible)
         If GridRow > 1 Then
             Grid.RowCount := GridRow
         Else
@@ -411,12 +416,25 @@ Begin
 End;
 
 {..............................................................................}
-{ Filter text changed event handler                                            }
+{ Filter text changed event handler - debounced via timer                      }
 {..............................................................................}
 Procedure TFormResults.EditFilterChange(Sender: TObject);
+Begin
+    // Reset timer - only apply filter after user stops typing
+    FilterTimer.Enabled := False;
+    FilterTimer.Enabled := True;
+End;
+
+{..............................................................................}
+{ Timer event - apply filter after typing stops                                }
+{..............................................................................}
+Procedure TFormResults.FilterTimerTimer(Sender: TObject);
 Var
     FilterCol : Integer;
 Begin
+    // Stop timer
+    FilterTimer.Enabled := False;
+
     // Get selected column index (-1 for "All Columns")
     FilterCol := ComboBoxFilterColumn.ItemIndex - 1;
     ApplyFilter(StringGridResults, FilterCol, EditFilter.Text);

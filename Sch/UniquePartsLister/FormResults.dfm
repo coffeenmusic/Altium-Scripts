@@ -111,4 +111,11 @@ object FormResults: TFormResults
     Left = 560
     Top = 486
   end
+  object FilterTimer: TTimer
+    Enabled = False
+    Interval = 300
+    OnTimer = FilterTimerTimer
+    Left = 600
+    Top = 486
+  end
 end

@@ -278,6 +278,10 @@ Begin
         Doc := Project.DM_LogicalDocuments(I);
         If Doc.DM_DocumentKind = 'SCH' Then
         Begin
+            // Open the document to ensure it's loaded
+            Client.OpenDocument('SCH', Doc.DM_FullPath);
+
+            // Get the schematic document handle
             SchDoc := SchServer.GetSchDocumentByPath(Doc.DM_FullPath);
             If SchDoc <> Nil Then
                 CollectParametersFromSheet(SchDoc);
@@ -309,12 +313,19 @@ Begin
         Project := GetWorkspace.DM_FocusedProject;
         If Project = Nil Then Exit;
 
+        // Compile project to ensure all documents are accessible
+        Project.DM_Compile;
+
         // Iterate through all schematic documents
         For I := 0 To Project.DM_LogicalDocumentCount - 1 Do
         Begin
             Doc := Project.DM_LogicalDocuments(I);
             If Doc.DM_DocumentKind = 'SCH' Then
             Begin
+                // Open the document to ensure it's loaded
+                Client.OpenDocument('SCH', Doc.DM_FullPath);
+
+                // Get the schematic document handle
                 SchDoc := SchServer.GetSchDocumentByPath(Doc.DM_FullPath);
                 If SchDoc <> Nil Then
                 Begin
@@ -447,6 +458,9 @@ Begin
 
     Found := False;
 
+    // Compile project to ensure all documents are accessible
+    Project.DM_Compile;
+
     // Iterate through all schematic documents
     For DocIndex := 0 To Project.DM_LogicalDocumentCount - 1 Do
     Begin
@@ -455,14 +469,12 @@ Begin
         If Project.DM_LogicalDocuments(DocIndex).DM_DocumentKind = 'SCH' Then
         Begin
             DocPath := Project.DM_LogicalDocuments(DocIndex).DM_FullPath;
-            SchDoc := SchServer.GetSchDocumentByPath(DocPath);
 
-            If SchDoc = Nil Then
-            Begin
-                // Document not open, try to open it
-                Client.OpenDocument('SCH', DocPath);
-                SchDoc := SchServer.GetSchDocumentByPath(DocPath);
-            End;
+            // Always open the document to ensure it's loaded
+            Client.OpenDocument('SCH', DocPath);
+
+            // Get the schematic document handle
+            SchDoc := SchServer.GetSchDocumentByPath(DocPath);
 
             If SchDoc <> Nil Then
             Begin
