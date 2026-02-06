@@ -132,6 +132,123 @@ Begin
 End;
 
 {..............................................................................}
+{ Get cache file path based on current project                                 }
+{..............................................................................}
+Function GetCacheFilePath : String;
+Var
+    Project     : IProject;
+    ProjectName : String;
+Begin
+    Result := '';
+    Project := GetWorkspace.DM_FocusedProject;
+    If Project = Nil Then Exit;
+
+    ProjectName := ExtractFileName(Project.DM_ProjectFileName);
+    // Remove extension
+    If Pos('.', ProjectName) > 0 Then
+        ProjectName := Copy(ProjectName, 1, Pos('.', ProjectName) - 1);
+
+    Result := ExtractFilePath(SettingsFilePath) + ProjectName + '_UniquePartsCache.txt';
+End;
+
+{..............................................................................}
+{ Save cached data to file                                                     }
+{..............................................................................}
+Procedure SaveCachedData(UniqueIDParam : String; ColumnParams : TStringList);
+Var
+    CacheFile  : TStringList;
+    CachePath  : String;
+    I          : Integer;
+    ColStr     : String;
+Begin
+    CachePath := GetCacheFilePath;
+    If CachePath = '' Then Exit;
+
+    CacheFile := TStringList.Create;
+    Try
+        // First line: UniqueIDParam
+        CacheFile.Add(UniqueIDParam);
+
+        // Second line: Column params (comma-separated)
+        ColStr := '';
+        For I := 0 To ColumnParams.Count - 1 Do
+        Begin
+            If I > 0 Then ColStr := ColStr + ',';
+            ColStr := ColStr + ColumnParams.Strings[I];
+        End;
+        CacheFile.Add(ColStr);
+
+        // Remaining lines: Data rows
+        For I := 0 To UniquePartsData.Count - 1 Do
+            CacheFile.Add(UniquePartsData.Strings[I]);
+
+        CacheFile.SaveToFile(CachePath);
+    Finally
+        CacheFile.Free;
+    End;
+End;
+
+{..............................................................................}
+{ Load cached data from file - returns True if successful                      }
+{..............................................................................}
+Function LoadCachedData(Var UniqueIDParam : String; ColumnParams : TStringList) : Boolean;
+Var
+    CacheFile  : TStringList;
+    CachePath  : String;
+    I          : Integer;
+    ColStr     : String;
+    StartPos   : Integer;
+    CommaPos   : Integer;
+    ParamName  : String;
+Begin
+    Result := False;
+    CachePath := GetCacheFilePath;
+    If (CachePath = '') Or (Not FileExists(CachePath)) Then Exit;
+
+    CacheFile := TStringList.Create;
+    Try
+        CacheFile.LoadFromFile(CachePath);
+
+        // Need at least 2 lines (UniqueID and columns)
+        If CacheFile.Count < 2 Then Exit;
+
+        // First line: UniqueIDParam
+        UniqueIDParam := CacheFile.Strings[0];
+
+        // Second line: Column params
+        ColStr := CacheFile.Strings[1];
+        ColumnParams.Clear;
+
+        // Parse comma-separated column names
+        If ColStr <> '' Then
+        Begin
+            StartPos := 1;
+            While StartPos <= Length(ColStr) Do
+            Begin
+                CommaPos := StartPos;
+                While (CommaPos <= Length(ColStr)) And (Copy(ColStr, CommaPos, 1) <> ',') Do
+                    Inc(CommaPos);
+
+                ParamName := Trim(Copy(ColStr, StartPos, CommaPos - StartPos));
+                If ParamName <> '' Then
+                    ColumnParams.Add(ParamName);
+
+                StartPos := CommaPos + 1;
+            End;
+        End;
+
+        // Remaining lines: Data rows
+        UniquePartsData.Clear;
+        For I := 2 To CacheFile.Count - 1 Do
+            UniquePartsData.Add(CacheFile.Strings[I]);
+
+        Result := True;
+    Finally
+        CacheFile.Free;
+    End;
+End;
+
+{..............................................................................}
 { Get parameter value from a component by parameter name                       }
 {..............................................................................}
 Function GetParameterValue(AComponent : ISch_Component; ParamName : String) : String;
@@ -596,27 +713,50 @@ End;
 {..............................................................................}
 { Show results for given parameters - shared by both entry points              }
 {..............................................................................}
-Procedure ShowResultsForParams(UniqueIDParam : String; ColumnParams : TStringList);
+Procedure ShowResultsForParams(UniqueIDParam : String; ColumnParams : TStringList; BuildData : Boolean);
+Var
+    ModalResult : Integer;
 Begin
-    // Build unique parts list
-    BeginHourGlass;
-    BuildUniquePartsList(UniqueIDParam, ColumnParams);
-    EndHourGlass;
-
-    If UniquePartsData.Count = 0 Then
+    // Build unique parts list if requested
+    If BuildData Then
     Begin
-        ShowMessage('No unique parts found with the selected parameter.');
-        Exit;
+        BeginHourGlass;
+        BuildUniquePartsList(UniqueIDParam, ColumnParams);
+        EndHourGlass;
+
+        If UniquePartsData.Count = 0 Then
+        Begin
+            ShowMessage('No unique parts found with the selected parameter.');
+            Exit;
+        End;
+
+        // Save to cache for next time
+        SaveCachedData(UniqueIDParam, ColumnParams);
     End;
 
     // Show results dialog
     PopulateResultsForm(UniqueIDParam, ColumnParams);
 
+    // Reset refresh flag
+    RefreshRequested := False;
+
     // Show form and handle result
-    If FormResults.ShowModal = mrNavigate Then
+    ModalResult := FormResults.ShowModal;
+
+    // Handle navigation
+    If ModalResult = mrNavigate Then
     Begin
-        // User double-clicked to navigate - find and zoom to component
         NavigateToComponent(NavigateParamName, NavigateParamValue);
+    End
+    // Handle refresh request
+    Else If RefreshRequested Then
+    Begin
+        // Delete cache file
+        If FileExists(GetCacheFilePath) Then
+            DeleteFile(GetCacheFilePath);
+
+        // Re-scan and show results
+        ShowResultsForParams(UniqueIDParam, ColumnParams, True);
     End;
 End;
 
@@ -686,8 +826,8 @@ Begin
         // Save settings to INI file for next time
         SaveSettingsToINI(UniqueIDParam, ColumnParams);
 
-        // Show results
-        ShowResultsForParams(UniqueIDParam, ColumnParams);
+        // Show results (build data from schematic)
+        ShowResultsForParams(UniqueIDParam, ColumnParams, True);
 
     Finally
         AllParameterNames.Free;
@@ -734,8 +874,17 @@ Begin
         UniquePartsData := TStringList.Create;
 
         Try
-            // Show results using saved parameters
-            ShowResultsForParams(UniqueIDParam, ColumnParams);
+            // Try to load cached data first
+            If Not LoadCachedData(UniqueIDParam, ColumnParams) Then
+            Begin
+                // No cache - need to build data
+                ShowResultsForParams(UniqueIDParam, ColumnParams, True);
+            End
+            Else
+            Begin
+                // Cache loaded successfully - show results without rebuilding
+                ShowResultsForParams(UniqueIDParam, ColumnParams, False);
+            End;
         Finally
             AllParameterNames.Free;
             UniquePartsData.Free;

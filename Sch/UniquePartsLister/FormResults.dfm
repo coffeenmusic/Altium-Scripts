@@ -85,7 +85,7 @@ object FormResults: TFormResults
     OnMouseUp = StringGridResultsMouseUp
   end
   object ButtonExport: TButton
-    Left = 608
+    Left = 512
     Top = 490
     Width = 90
     Height = 25
@@ -93,6 +93,16 @@ object FormResults: TFormResults
     Caption = 'Export to CSV'
     TabOrder = 4
     OnClick = ButtonExportClick
+  end
+  object ButtonRefresh: TButton
+    Left = 608
+    Top = 490
+    Width = 90
+    Height = 25
+    Anchors = [akRight, akBottom]
+    Caption = 'Refresh Data'
+    TabOrder = 5
+    OnClick = ButtonRefreshClick
   end
   object ButtonClose: TButton
     Left = 704
@@ -102,7 +112,7 @@ object FormResults: TFormResults
     Anchors = [akRight, akBottom]
     Caption = 'Close'
     ModalResult = 1
-    TabOrder = 5
+    TabOrder = 6
   end
   object SaveDialog: TSaveDialog
     DefaultExt = 'csv'

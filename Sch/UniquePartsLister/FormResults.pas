@@ -20,10 +20,12 @@ Type
     ButtonClearFilter     : TButton;
     StringGridResults     : TStringGrid;
     ButtonExport          : TButton;
+    ButtonRefresh         : TButton;
     ButtonClose           : TButton;
     SaveDialog            : TSaveDialog;
     FilterTimer           : TTimer;
     procedure ButtonExportClick(Sender: TObject);
+    procedure ButtonRefreshClick(Sender: TObject);
     procedure StringGridResultsMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
     procedure StringGridResultsMouseUp(Sender: TObject; Button: TMouseButton;
@@ -66,6 +68,9 @@ Var
   // Track clicked cell for double-click
   LastClickedCol     : Integer;
   LastClickedRow     : Integer;
+
+  // Request refresh flag
+  RefreshRequested   : Boolean;
 
 Implementation
 
@@ -485,6 +490,15 @@ Begin
 
     // Close form with navigation result
     ModalResult := mrNavigate;
+End;
+
+{..............................................................................}
+{ Refresh button click handler                                                 }
+{..............................................................................}
+Procedure TFormResults.ButtonRefreshClick(Sender: TObject);
+Begin
+    RefreshRequested := True;
+    ModalResult := mrOk;
 End;
 
 {..............................................................................}
