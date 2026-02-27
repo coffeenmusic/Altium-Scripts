@@ -567,6 +567,8 @@ Var
     CompValue    : String;
     Found        : Boolean;
     DocPath      : String;
+    BR           : TCoordRect;
+    Padding      : Integer;
 Begin
     If ParamValue = '' Then Exit;
 
@@ -613,18 +615,30 @@ Begin
                             // Make this document the active document
                             Client.ShowDocument(Client.OpenDocument('SCH', DocPath));
 
-                            // Deselect all first
+                            // Get component bounding rectangle for zoom
+                            BR := AComponent.BoundingRectangle;
+
+                            // Calculate padding (use larger dimension, minimum 500000)
+                            Padding := BR.Right - BR.Left;
+                            If (BR.Top - BR.Bottom) > Padding Then
+                                Padding := BR.Top - BR.Bottom;
+                            If Padding < 500000 Then
+                                Padding := 500000;
+
+                            // Zoom to component area with padding
+                            ResetParameters;
+                            AddStringParameter('Action', 'ViewArea');
+                            AddStringParameter('ViewArea_Left', IntToStr(BR.Left - Padding));
+                            AddStringParameter('ViewArea_Bottom', IntToStr(BR.Bottom - Padding));
+                            AddStringParameter('ViewArea_Right', IntToStr(BR.Right + Padding));
+                            AddStringParameter('ViewArea_Top', IntToStr(BR.Top + Padding));
+                            RunProcess('Sch:Zoom');
+
+                            // Deselect all then select this component to highlight it
                             ResetParameters;
                             RunProcess('Sch:DeSelect');
-
-                            // Select this component
                             AComponent.SetState_Selection(True);
-
-                            // Refresh and zoom to selected component
                             SchDoc.GraphicallyInvalidate;
-
-                            ResetParameters;
-                            RunProcess('Sch:ZoomSelected');
 
                             Break;
                         End;
@@ -830,9 +844,9 @@ Begin
         ShowResultsForParams(UniqueIDParam, ColumnParams, True);
 
     Finally
-        AllParameterNames.Free;
-        UniquePartsData.Free;
-        ColumnParams.Free;
+        If AllParameterNames <> Nil Then AllParameterNames.Free;
+        If UniquePartsData <> Nil Then UniquePartsData.Free;
+        If ColumnParams <> Nil Then ColumnParams.Free;
     End;
 End;
 
@@ -886,12 +900,12 @@ Begin
                 ShowResultsForParams(UniqueIDParam, ColumnParams, False);
             End;
         Finally
-            AllParameterNames.Free;
-            UniquePartsData.Free;
+            If AllParameterNames <> Nil Then AllParameterNames.Free;
+            If UniquePartsData <> Nil Then UniquePartsData.Free;
         End;
 
     Finally
-        ColumnParams.Free;
+        If ColumnParams <> Nil Then ColumnParams.Free;
     End;
 End;
 
