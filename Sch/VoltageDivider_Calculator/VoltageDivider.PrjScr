@@ -1,0 +1,16 @@
+[Design]
+Version=1.0
+HierarchyMode=None
+ChannelRoomNamingStyle=0
+
+[Document1]
+DocumentPath=VoltageDivider.pas
+AnnotationEnabled=1
+
+[Document2]
+DocumentPath=FormMain.pas
+AnnotationEnabled=1
+
+[Document3]
+DocumentPath=FormResults.pas
+AnnotationEnabled=1
