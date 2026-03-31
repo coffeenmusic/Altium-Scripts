@@ -913,7 +913,8 @@ Var
     Cmp : IPCB_Component;
     Pad : IPCB_Pad;
     cwn : TStringList;
-    CmpDes : String;
+    CmpDes, MatchedNet : String;
+    MatchCount : Integer;
 Begin
     cwn := TStringList.Create;
     cwn.Duplicates := dupIgnore;
@@ -932,6 +933,9 @@ Begin
         // Only consider Resistors and Capacitors
         If AnsiStartsStr('R', CmpDes) Or AnsiStartsStr('C', CmpDes) Then
         Begin
+            MatchCount := 0;
+            MatchedNet := '';
+
             GrpIter := Cmp.GroupIterator_Create;
             GrpIter.SetState_FilterAll;
             GrpIter.AddFilter_ObjectSet(MkSet(ePadObject));
@@ -945,7 +949,8 @@ Begin
                     Begin
                         If nets.IndexOf(Pad.Net.Name) >= 0 Then
                         Begin
-                             cwn.Add(Pad.Net.Name+'='+CmpDes);
+                             Inc(MatchCount);
+                             MatchedNet := Pad.Net.Name;
                         End;
                     End;
                 End;
@@ -953,6 +958,13 @@ Begin
                 Pad := GrpIter.NextPCBObject;
             End;
             Cmp.GroupIterator_Destroy(GrpIter);
+
+            // Only add if exactly one pad has a known net (series component).
+            // Skip if both pads match (termination resistor between the pair).
+            If MatchCount = 1 Then
+            Begin
+                cwn.Add(MatchedNet+'='+CmpDes);
+            End;
         End;
 
         Cmp := Iterator.NextPCBObject;
