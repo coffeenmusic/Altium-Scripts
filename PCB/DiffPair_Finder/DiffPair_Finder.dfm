@@ -23,27 +23,45 @@ object Form1: TForm1
     Height = 13
     Caption = 'Hold SHIFT to select multiple pairs.'
   end
-  object StringGrid: TStringGrid
+  object PageControl1: TPageControl
     Left = 8
     Top = 8
     Width = 912
     Height = 592
+    ActivePage = TabSheet1
     Anchors = [akLeft, akTop, akRight]
-    ColCount = 3
-    DefaultColWidth = 300
-    Options = [goFixedVertLine, goFixedHorzLine, goVertLine, goHorzLine, goRangeSelect, goColSizing, goRowSelect, goFixedColClick]
-    ScrollBars = ssVertical
     TabOrder = 0
-    ColWidths = (
-      300
-      300
-      300)
-    RowHeights = (
-      24
-      24
-      24
-      24
-      24)
+    object TabSheet1: TTabSheet
+      Caption = 'Found Pairs'
+      object StringGrid: TStringGrid
+        Left = 0
+        Top = 0
+        Width = 904
+        Height = 564
+        Align = alClient
+        ColCount = 3
+        DefaultColWidth = 300
+        Options = [goFixedVertLine, goFixedHorzLine, goVertLine, goHorzLine, goRangeSelect, goColSizing, goRowSelect, goFixedColClick]
+        ScrollBars = ssVertical
+        TabOrder = 0
+      end
+    end
+    object TabSheet2: TTabSheet
+      Caption = 'Unclassified'
+      ImageIndex = 1
+      object StringGridUnclassified: TStringGrid
+        Left = 0
+        Top = 0
+        Width = 904
+        Height = 564
+        Align = alClient
+        ColCount = 3
+        DefaultColWidth = 300
+        Options = [goFixedVertLine, goFixedHorzLine, goVertLine, goHorzLine, goRangeSelect, goColSizing, goRowSelect, goFixedColClick]
+        ScrollBars = ssVertical
+        TabOrder = 0
+      end
+    end
   end
   object btnAddDiffPairs: TButton
     Left = 744

@@ -3,8 +3,9 @@
 // ChatGPT 4o
 
 var
-    Board          : IPCB_Board;
-    GlbDiffPairs   : TStringList;
+    Board               : IPCB_Board;
+    GlbDiffPairs        : TStringList;
+    GlbUnclassifiedPairs : TStringList;
 
 Function DiffPolarity(txt: String): Integer;
 var
@@ -574,6 +575,69 @@ Begin
     result := Existing;
 End;
 
+Function GetUnclassifiedDiffPairs(Dummy): TStringList;
+Var
+    Iterator       : IPCB_BoardIterator;
+    ClassIterator  : IPCB_BoardIterator;
+    DiffPair       : IPCB_DifferentialPair;
+    DiffClass      : IPCB_ObjectClass;
+    ClassifiedNames : TStringList;
+    Unclassified   : TStringList;
+    I              : Integer;
+    DiffName       : String;
+Begin
+    ClassifiedNames := TStringList.Create;
+    ClassifiedNames.Sorted := True;
+    ClassifiedNames.Duplicates := dupIgnore;
+
+    Unclassified := TStringList.Create;
+    Unclassified.NameValueSeparator := '=';
+
+    // Collect all diff pair names that are in a non-super class
+    ClassIterator := Board.BoardIterator_Create;
+    ClassIterator.SetState_FilterAll;
+    ClassIterator.AddFilter_ObjectSet(MkSet(eClassObject));
+    DiffClass := ClassIterator.FirstPCBObject;
+    While DiffClass <> Nil Do
+    Begin
+        If (DiffClass.MemberKind = eClassMemberKind_DifferentialPair) And Not(DiffClass.SuperClass) Then
+        Begin
+            I := 0;
+            While DiffClass.MemberName[I] <> '' Do
+            Begin
+                ClassifiedNames.Add(DiffClass.MemberName[I]);
+                Inc(I);
+            End;
+        End;
+        DiffClass := ClassIterator.NextPCBObject;
+    End;
+    Board.BoardIterator_Destroy(ClassIterator);
+
+    // Find existing diff pairs not in any non-super class
+    Iterator := Board.BoardIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eDifferentialPairObject));
+    Iterator.AddFilter_LayerSet(AllLayers);
+    Iterator.AddFilter_Method(eProcessAll);
+
+    DiffPair := Iterator.FirstPCBObject;
+    While DiffPair <> Nil Do
+    Begin
+        DiffName := DiffPair.Name;
+        If ClassifiedNames.IndexOf(DiffName) = -1 Then
+        Begin
+            If (DiffPair.PositiveNet <> Nil) And (DiffPair.NegativeNet <> Nil) Then
+            Begin
+                Unclassified.Add(DiffName + '=' + DiffPair.PositiveNet.Name + ';' + DiffPair.NegativeNet.Name);
+            End;
+        End;
+        DiffPair := Iterator.NextPCBObject;
+    End;
+    Board.BoardIterator_Destroy(Iterator);
+
+    ClassifiedNames.Free;
+    result := Unclassified;
+End;
+
 Function AddDiffPairClass(ClassName: String): IPCB_ObjectClass;
 Var
     DiffClass      :  IPCB_ObjectClass;
@@ -1038,6 +1102,53 @@ Begin
     AddKeysToStringGrid(diffs, cbHideExisting.Checked);
 End;
 
+Function InitUnclassifiedGrid(diffs: TStringList);
+Var
+    i, RowIdx : Integer;
+    Row : TStringList;
+Begin
+    Row := TStringList.Create;
+    Row.Delimiter := ';';
+    Row.StrictDelimiter := True;
+
+    StringGridUnclassified.ColCount := 3;
+    StringGridUnclassified.RowCount := 1;
+    StringGridUnclassified.Cells[0, 0] := 'Diff Pair Name';
+    StringGridUnclassified.Cells[1, 0] := 'Positive Net Name';
+    StringGridUnclassified.Cells[2, 0] := 'Negative Net Name';
+    StringGridUnclassified.FixedCols := 0;
+
+    RowIdx := 1;
+    For i := 0 to diffs.Count - 1 do
+    begin
+        Row.DelimitedText := diffs.ValueFromIndex[i];
+        if Row.Count < 2 then continue;
+
+        StringGridUnclassified.RowCount := StringGridUnclassified.RowCount + 1;
+        StringGridUnclassified.Cells[0, RowIdx] := diffs.Names[i];
+        StringGridUnclassified.Cells[1, RowIdx] := Row[0];
+        StringGridUnclassified.Cells[2, RowIdx] := Row[1];
+
+        Inc(RowIdx);
+    end;
+
+    Row.Free;
+End;
+
+Function AssignDiffPairsToClass(DiffClass: IPCB_ObjectClass, diffs: TStringList);
+Var
+    i : Integer;
+    diffName : String;
+Begin
+    PCBServer.PreProcess;
+    For i := 0 to diffs.Count - 1 do
+    Begin
+        diffName := diffs.Names[i];
+        DiffClass.AddMemberByName(diffName);
+    End;
+    PCBServer.PostProcess;
+End;
+
 {..............................................................................}
 Procedure Run(UseGUI : Boolean);
 Const
@@ -1083,6 +1194,9 @@ Begin
     begin
         AddDiffPairClassesToComboBox(Nil);
         InitStringGrid(diffs);
+
+        GlbUnclassifiedPairs := GetUnclassifiedDiffPairs(Nil);
+        InitUnclassifiedGrid(GlbUnclassifiedPairs);
 
         Form1.ShowModal;
     end
@@ -1144,7 +1258,7 @@ procedure TForm1.btnAddDiffPairsClick(Sender: TObject);
 var
     idx : Integer;
     ClassObj: IPCB_ObjectClass;
-    SelectedDiffPairs: StringList;
+    SelectedDiffPairs: TStringList;
 begin
     // Get ComboBox selection index
     idx := cbDiffPairClasses.GetItemIndex();
@@ -1160,13 +1274,24 @@ begin
         ClassObj := cbDiffPairClasses.Items.Objects[idx];
     end;
 
-    // Get selected diff pairs from String Grid
-    SelectedDiffPairs := GetSelectedDiffPairs(StringGrid);
+    // Unclassified tab: assign existing diff pairs to class
+    if PageControl1.ActivePageIndex = 1 then
+    begin
+        SelectedDiffPairs := GetSelectedDiffPairs(StringGridUnclassified);
+        AssignDiffPairsToClass(ClassObj, SelectedDiffPairs);
 
-    // 4. Create diff pairs in layout
-    AddDiffPairs(ClassObj, SelectedDiffPairs);
+        GlbUnclassifiedPairs.Free;
+        GlbUnclassifiedPairs := GetUnclassifiedDiffPairs(Nil);
+        InitUnclassifiedGrid(GlbUnclassifiedPairs);
+    end
+    // Found Pairs tab: create new diff pairs and add to class
+    else
+    begin
+        SelectedDiffPairs := GetSelectedDiffPairs(StringGrid);
+        AddDiffPairs(ClassObj, SelectedDiffPairs);
+    end;
 
-    InitStringGrid(GlbDiffPairs); // Refresh String Grid
+    InitStringGrid(GlbDiffPairs); // Refresh Found Pairs grid
 end;
 
 
