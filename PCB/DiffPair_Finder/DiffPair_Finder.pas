@@ -737,7 +737,6 @@ End;
 
 Function IsConnectedDiffPair(cwn: TStringList, pStr: String, nStr: String, var pCon: String, var nCon: String): Boolean;
 Var
-    Iterator : IPCB_BoardIterator;
     Cmp : IPCB_Component;
     inCmps : TStringList;
     CmpDes, test : String;
@@ -774,7 +773,7 @@ Begin
         CmpDes := inCmps[i];
         Cmp := Board.GetPcbComponentByRefDes(CmpDes);
 
-        nCon := GetConnectedNetName(Cmp, pStr);
+        nCon := GetConnectedNetName(Cmp, nStr);
         If nCon <> '' Then Break;
     end;
 
@@ -784,8 +783,6 @@ Begin
     Begin
         result := True;
     End;
-
-    Board.BoardIterator_Destroy(Iterator);
 End;
 
 function RemovePrefix(const InputStr, Prefix: String): String;

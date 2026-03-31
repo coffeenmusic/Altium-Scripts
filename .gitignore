@@ -2,3 +2,6 @@ History/
 __Previews/
 *.csv
 *.OutJob
+*.ini
+*.log
+*.txt
