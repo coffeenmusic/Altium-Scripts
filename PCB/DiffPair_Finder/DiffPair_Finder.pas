@@ -94,6 +94,14 @@ Begin
      Begin
          result := -1;
      End
+     Else If AnsiEndsStr('h', t) Then
+     Begin
+         result := 1;
+     End
+     Else If AnsiEndsStr('l', t) Then
+     Begin
+         result := -1;
+     End
      Else If ContainsText(t, '_dp') Then
      Begin
        result := 1;
